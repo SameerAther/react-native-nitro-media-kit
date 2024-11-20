@@ -1,0 +1,17 @@
+{
+  "cxxNamespace": ["mediakit"],
+  "ios": {
+    "iosModuleName": "MediaKit"
+  },
+  "android": {
+    "androidNamespace": ["mediakit"],
+    "androidCxxLibName": "MediaKit"
+  },
+  "autolinking": {
+    "MediaKit": {
+      "swift": "HybridMediaKit",
+      "kotlin": "HybridMediaKit"
+    }
+  },
+  "ignorePaths": ["node_modules"]
+}
