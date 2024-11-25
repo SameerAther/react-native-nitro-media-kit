@@ -1,8 +1,8 @@
 # React Native Nitro Media Kit
 
-[![npm version](https://img.shields.io/npm/v/react-native-nitro-media-kit.svg?style=flat-square)](https://www.npmjs.com/package/react-native-nitro-media-kit)
-[![npm downloads](https://img.shields.io/npm/dm/react-native-nitro-media-kit.svg?style=flat-square)](https://www.npmjs.com/package/react-native-nitro-media-kit)
-[![License](https://img.shields.io/npm/l/react-native-nitro-media-kit.svg?style=flat-square)](https://github.com/your-username/react-native-nitro-media-kit/blob/main/LICENSE)
+[![npm version](https://img.shields.io/npm/v/react-native-nitro-media-kit.svg?style=flat-square)](https://www.npmjs.com/package/react-native-nitro-media-kit)  
+[![npm downloads](https://img.shields.io/npm/dm/react-native-nitro-media-kit.svg?style=flat-square)](https://www.npmjs.com/package/react-native-nitro-media-kit)  
+[![License](https://img.shields.io/npm/l/react-native-nitro-media-kit.svg?style=flat-square)](https://github.com/your-username/react-native-nitro-media-kit/blob/main/LICENSE)  
 
 🎥 **React Native Nitro Media Kit** empowers your React Native applications with robust media processing capabilities. Perform tasks like merging videos and converting images into videos with ease, all while leveraging the power of Nitro Modules.
 
@@ -28,27 +28,17 @@ Before getting started, ensure you have the following:
 
 ## 📦 Installation
 
-1. Install the package:
+Run the following command to install the package and its dependencies:
 
-   ```bash
-   # Using npm
-   npm install react-native-nitro-media-kit
+```bash
+npm install react-native-nitro-media-kit react-native-nitro-modules
+```
 
-   # Using yarn
-   yarn add react-native-nitro-media-kit
-   ```
+For iOS, install pods:
 
-2. Link the package:
-
-   ```bash
-   npx react-native link react-native-nitro-media-kit
-   ```
-
-3. Install pods for iOS:
-
-   ```bash
-   cd ios && pod install
-   ```
+```bash
+cd ios && pod install
+```
 
 ---
 
