@@ -16,6 +16,7 @@ namespace MediaKit { class HybridMediaKitSpecCxx; }
 
 #include <NitroModules/Promise.hpp>
 #include <string>
+#include <vector>
 
 #if __has_include(<NitroModules/HybridContext.hpp>)
 #include <NitroModules/HybridContext.hpp>
@@ -68,6 +69,10 @@ namespace margelo::nitro::mediakit {
     }
     inline std::shared_ptr<Promise<std::string>> convertImageToVideo(const std::string& image, double duration) override {
       auto __result = _swiftPart.convertImageToVideo(image, std::forward<decltype(duration)>(duration));
+      return __result;
+    }
+    inline std::shared_ptr<Promise<std::string>> mergeVideos(const std::vector<std::string>& videos) override {
+      auto __result = _swiftPart.mergeVideos(videos);
       return __result;
     }
 

@@ -17,6 +17,7 @@
 
 #include <NitroModules/Promise.hpp>
 #include <string>
+#include <vector>
 
 namespace margelo::nitro::mediakit {
 
@@ -51,6 +52,7 @@ namespace margelo::nitro::mediakit {
       // Methods
       virtual double add(double a, double b) = 0;
       virtual std::shared_ptr<Promise<std::string>> convertImageToVideo(const std::string& image, double duration) = 0;
+      virtual std::shared_ptr<Promise<std::string>> mergeVideos(const std::vector<std::string>& videos) = 0;
 
     protected:
       // Hybrid Setup

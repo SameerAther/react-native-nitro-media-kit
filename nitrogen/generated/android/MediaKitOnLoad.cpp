@@ -25,7 +25,6 @@ int initialize(JavaVM* vm) {
   return facebook::jni::initialize(vm, [] {
     // Register native JNI methods
     margelo::nitro::mediakit::JHybridMediaKitSpec::registerNatives();
-    margelo::nitro::mediakit::JHybridMediaKitSpec::registerNatives();
 
     // Register Nitro Hybrid Objects
     HybridObjectRegistry::registerHybridObjectConstructor(

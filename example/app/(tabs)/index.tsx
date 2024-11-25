@@ -8,9 +8,6 @@ import { ThemedView } from '@/components/ThemedView'
 import { mediakit } from 'react-native-nitro-media-kit'
 
 export default function HomeScreen() {
-  const [result, setResult] = useState<number | null>(null)
-  const [videoPath, setVideoPath] = useState<string | null>(null)
-
   const handleConvertImageToVideo = async () => {
     try {
       const video = await mediakit.convertImageToVideo(
@@ -21,6 +18,21 @@ export default function HomeScreen() {
       console.log(video, 'Video created using Nitro Media Kit')
     } catch (error) {
       console.error('Error converting image to video:', error)
+      Alert.alert('Error', 'Failed to create video')
+    }
+  }
+
+  const handleMergeVideos = async () => {
+    try {
+      const video = await mediakit.mergeVideos([
+        'https://www.sample-videos.com/video321/mp4/720/big_buck_bunny_720p_1mb.mp4',
+        'https://www.sample-videos.com/video321/mp4/720/big_buck_bunny_720p_2mb.mp4',
+        'https://www.sample-videos.com/video321/mp4/720/big_buck_bunny_720p_2mb.mp4',
+      ])
+      Alert.alert('Video Created', `Saved at: ${video}`)
+      console.log(video, 'Video created using Nitro Media Kit')
+    } catch (error) {
+      console.error('Error merging videos:', error)
       Alert.alert('Error', 'Failed to create video')
     }
   }
@@ -36,7 +48,6 @@ export default function HomeScreen() {
       }
     >
       <ThemedView style={styles.titleContainer}>
-        <ThemedText type="title">Result: {result}</ThemedText>
         <HelloWave />
       </ThemedView>
       <ThemedView style={styles.stepContainer}>
@@ -44,7 +55,9 @@ export default function HomeScreen() {
           title="Convert Image to Video"
           onPress={handleConvertImageToVideo}
         />
-        {videoPath && <ThemedText>Video saved at: {videoPath}</ThemedText>}
+      </ThemedView>
+      <ThemedView style={styles.stepContainer}>
+        <Button title="Merge Videos" onPress={handleMergeVideos} />
       </ThemedView>
       <ThemedView style={styles.stepContainer}>
         <ThemedText type="subtitle">Step 1: Try it</ThemedText>
