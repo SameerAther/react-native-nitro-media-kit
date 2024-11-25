@@ -16,6 +16,7 @@ namespace margelo::nitro::mediakit {
     registerHybrids(this, [](Prototype& prototype) {
       prototype.registerHybridGetter("pi", &HybridMediaKitSpec::getPi);
       prototype.registerHybridMethod("add", &HybridMediaKitSpec::add);
+      prototype.registerHybridMethod("convertImageToVideo", &HybridMediaKitSpec::convertImageToVideo);
     });
   }
 

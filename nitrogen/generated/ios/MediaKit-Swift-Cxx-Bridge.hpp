@@ -17,7 +17,11 @@ namespace MediaKit { class HybridMediaKitSpecCxx; }
 
 // Include C++ defined types
 #include "HybridMediaKitSpec.hpp"
+#include <NitroModules/Promise.hpp>
+#include <exception>
+#include <functional>
 #include <memory>
+#include <string>
 
 /**
  * Contains specialized versions of C++ templated types so they can be accessed from Swift,
@@ -25,6 +29,71 @@ namespace MediaKit { class HybridMediaKitSpecCxx; }
  */
 namespace margelo::nitro::mediakit::bridge::swift {
 
+  // pragma MARK: std::shared_ptr<Promise<std::string>>
+  /**
+   * Specialized version of `std::shared_ptr<Promise<std::string>>`.
+   */
+  using std__shared_ptr_Promise_std__string__ = std::shared_ptr<Promise<std::string>>;
+  inline std::shared_ptr<Promise<std::string>> create_std__shared_ptr_Promise_std__string__() {
+    return Promise<std::string>::create();
+  }
+  
+  // pragma MARK: std::function<void(const std::string& /* result */)>
+  /**
+   * Specialized version of `std::function<void(const std::string&)>`.
+   */
+  using Func_void_std__string = std::function<void(const std::string& /* result */)>;
+  /**
+   * Wrapper class for a `std::function<void(const std::string& / * result * /)>`, this can be used from Swift.
+   */
+  class Func_void_std__string_Wrapper final {
+  public:
+    explicit Func_void_std__string_Wrapper(const std::function<void(const std::string& /* result */)>& func): _function(func) {}
+    explicit Func_void_std__string_Wrapper(std::function<void(const std::string& /* result */)>&& func): _function(std::move(func)) {}
+    inline void call(std::string result) const {
+      _function(result);
+    }
+  private:
+    std::function<void(const std::string& /* result */)> _function;
+  };
+  inline Func_void_std__string create_Func_void_std__string(void* _Nonnull closureHolder, void(* _Nonnull call)(void* _Nonnull /* closureHolder */, std::string), void(* _Nonnull destroy)(void* _Nonnull)) {
+    std::shared_ptr<void> sharedClosureHolder(closureHolder, destroy);
+    return Func_void_std__string([sharedClosureHolder, call](const std::string& result) -> void {
+      call(sharedClosureHolder.get(), result);
+    });
+  }
+  inline std::shared_ptr<Func_void_std__string_Wrapper> share_Func_void_std__string(const Func_void_std__string& value) {
+    return std::make_shared<Func_void_std__string_Wrapper>(value);
+  }
+  
+  // pragma MARK: std::function<void(const std::exception& /* error */)>
+  /**
+   * Specialized version of `std::function<void(const std::exception&)>`.
+   */
+  using Func_void_std__exception = std::function<void(const std::exception& /* error */)>;
+  /**
+   * Wrapper class for a `std::function<void(const std::exception& / * error * /)>`, this can be used from Swift.
+   */
+  class Func_void_std__exception_Wrapper final {
+  public:
+    explicit Func_void_std__exception_Wrapper(const std::function<void(const std::exception& /* error */)>& func): _function(func) {}
+    explicit Func_void_std__exception_Wrapper(std::function<void(const std::exception& /* error */)>&& func): _function(std::move(func)) {}
+    inline void call(std::exception error) const {
+      _function(error);
+    }
+  private:
+    std::function<void(const std::exception& /* error */)> _function;
+  };
+  inline Func_void_std__exception create_Func_void_std__exception(void* _Nonnull closureHolder, void(* _Nonnull call)(void* _Nonnull /* closureHolder */, std::exception), void(* _Nonnull destroy)(void* _Nonnull)) {
+    std::shared_ptr<void> sharedClosureHolder(closureHolder, destroy);
+    return Func_void_std__exception([sharedClosureHolder, call](const std::exception& error) -> void {
+      call(sharedClosureHolder.get(), error);
+    });
+  }
+  inline std::shared_ptr<Func_void_std__exception_Wrapper> share_Func_void_std__exception(const Func_void_std__exception& value) {
+    return std::make_shared<Func_void_std__exception_Wrapper>(value);
+  }
+  
   // pragma MARK: std::shared_ptr<margelo::nitro::mediakit::HybridMediaKitSpec>
   /**
    * Specialized version of `std::shared_ptr<margelo::nitro::mediakit::HybridMediaKitSpec>`.

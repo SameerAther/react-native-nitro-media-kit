@@ -1,4 +1,5 @@
-import { Image, StyleSheet, Platform } from 'react-native'
+import React, { useState } from 'react'
+import { Image, StyleSheet, Platform, Button, View, Alert } from 'react-native'
 
 import { HelloWave } from '@/components/HelloWave'
 import ParallaxScrollView from '@/components/ParallaxScrollView'
@@ -7,7 +8,23 @@ import { ThemedView } from '@/components/ThemedView'
 import { mediakit } from 'react-native-nitro-media-kit'
 
 export default function HomeScreen() {
-  const result = mediakit.add(1, 2)
+  const [result, setResult] = useState<number | null>(null)
+  const [videoPath, setVideoPath] = useState<string | null>(null)
+
+  const handleConvertImageToVideo = async () => {
+    try {
+      const video = await mediakit.convertImageToVideo(
+        'https://unsplash.com/photos/b9-odQi5oDo/download?ixid=M3wxMjA3fDB8MXxzZWFyY2h8Mnx8dXJsfGVufDB8fHx8MTczMjM0MTM2NXww&force=true&w=1920',
+        5
+      )
+      Alert.alert('Video Created', `Saved at: ${video}`)
+      console.log(video, 'Video created using Nitro Media Kit')
+    } catch (error) {
+      console.error('Error converting image to video:', error)
+      Alert.alert('Error', 'Failed to create video')
+    }
+  }
+
   return (
     <ParallaxScrollView
       headerBackgroundColor={{ light: '#A1CEDC', dark: '#1D3D47' }}
@@ -19,8 +36,15 @@ export default function HomeScreen() {
       }
     >
       <ThemedView style={styles.titleContainer}>
-        <ThemedText type="title">{result}</ThemedText>
+        <ThemedText type="title">Result: {result}</ThemedText>
         <HelloWave />
+      </ThemedView>
+      <ThemedView style={styles.stepContainer}>
+        <Button
+          title="Convert Image to Video"
+          onPress={handleConvertImageToVideo}
+        />
+        {videoPath && <ThemedText>Video saved at: {videoPath}</ThemedText>}
       </ThemedView>
       <ThemedView style={styles.stepContainer}>
         <ThemedText type="subtitle">Step 1: Try it</ThemedText>

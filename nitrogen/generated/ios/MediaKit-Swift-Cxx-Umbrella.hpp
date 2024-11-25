@@ -13,7 +13,9 @@ namespace margelo::nitro::mediakit { class HybridMediaKitSpec; }
 
 // Include C++ defined types
 #include "HybridMediaKitSpec.hpp"
+#include <NitroModules/Promise.hpp>
 #include <memory>
+#include <string>
 
 // C++ helpers for Swift
 #include "MediaKit-Swift-Cxx-Bridge.hpp"

@@ -113,4 +113,21 @@ public class HybridMediaKitSpecCxx {
       fatalError("Swift errors can currently not be propagated to C++! See https://github.com/swiftlang/swift/issues/75290 (Error: \(__message))")
     }
   }
+  
+  @inline(__always)
+  public func convertImageToVideo(image: std.string, duration: Double) -> bridge.std__shared_ptr_Promise_std__string__ {
+    do {
+      let __result = try self.__implementation.convertImageToVideo(image: String(image), duration: duration)
+      return { () -> bridge.std__shared_ptr_Promise_std__string__ in
+        let __promise = bridge.create_std__shared_ptr_Promise_std__string__()
+        __result
+          .then({ __result in __promise.pointee.resolve(std.string(__result)) })
+          .catch({ __error in __promise.pointee.reject(__error.toCpp()) })
+        return __promise
+      }()
+    } catch {
+      let __message = "\(error.localizedDescription)"
+      fatalError("Swift errors can currently not be propagated to C++! See https://github.com/swiftlang/swift/issues/75290 (Error: \(__message))")
+    }
+  }
 }
