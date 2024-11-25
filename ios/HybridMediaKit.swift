@@ -108,6 +108,108 @@ class HybridMediaKit: HybridMediaKitSpec {
         }
     }
 
+    public func mergeVideos(videos: [String]) -> Promise<String> {
+        return Promise.async {
+            // This runs on a separate thread and can use `await` syntax
+
+            // Step 1: Get local file paths for all videos
+            var localVideoPaths = [String]()
+            for videoPathOrUrl in videos {
+                let localPath = try await self.getLocalFilePath(videoPathOrUrl)
+                localVideoPaths.append(localPath)
+            }
+
+            // Step 2: Create an AVMutableComposition
+            let composition = AVMutableComposition()
+
+            // Current time in the composition where the next video will be inserted
+            var currentTime = CMTime.zero
+
+            // Video and audio tracks in the composition
+            guard let compositionVideoTrack = composition.addMutableTrack(
+                withMediaType: .video,
+                preferredTrackID: kCMPersistentTrackID_Invalid
+            ) else {
+                throw NSError(domain: "HybridMediaKit", code: -1, userInfo: [NSLocalizedDescriptionKey: "Cannot create video track"])
+            }
+
+            guard let compositionAudioTrack = composition.addMutableTrack(
+                withMediaType: .audio,
+                preferredTrackID: kCMPersistentTrackID_Invalid
+            ) else {
+                throw NSError(domain: "HybridMediaKit", code: -1, userInfo: [NSLocalizedDescriptionKey: "Cannot create audio track"])
+            }
+
+            // Step 3: Loop through each video and insert it into the composition
+            for localVideoPath in localVideoPaths {
+                let videoURL = URL(fileURLWithPath: localVideoPath)
+                let asset = AVAsset(url: videoURL)
+
+                // Wait until asset is loaded
+                try await asset.loadValuesAsynchronously(forKeys: ["tracks"])
+
+                let timeRange = CMTimeRange(start: .zero, duration: asset.duration)
+
+                // Add video track
+                if let assetVideoTrack = asset.tracks(withMediaType: .video).first {
+                    try compositionVideoTrack.insertTimeRange(
+                        timeRange,
+                        of: assetVideoTrack,
+                        at: currentTime
+                    )
+                }
+
+                // Add audio track if available
+                if let assetAudioTrack = asset.tracks(withMediaType: .audio).first {
+                    try compositionAudioTrack.insertTimeRange(
+                        timeRange,
+                        of: assetAudioTrack,
+                        at: currentTime
+                    )
+                }
+
+                // Update current time
+                currentTime = CMTimeAdd(currentTime, asset.duration)
+            }
+
+            // Step 4: Export the merged video
+            // Create a temporary file path for the merged video
+            let tempDir = NSTemporaryDirectory()
+            let outputURL = URL(fileURLWithPath: tempDir).appendingPathComponent("merged_video_\(Int(Date().timeIntervalSince1970)).mp4")
+
+            // Remove existing file if necessary
+            if FileManager.default.fileExists(atPath: outputURL.path) {
+                try FileManager.default.removeItem(at: outputURL)
+            }
+
+            // Set up the exporter
+            guard let exporter = AVAssetExportSession(asset: composition, presetName: AVAssetExportPresetHighestQuality) else {
+                throw NSError(domain: "HybridMediaKit", code: -1, userInfo: [NSLocalizedDescriptionKey: "Cannot create AVAssetExportSession"])
+            }
+            exporter.outputURL = outputURL
+            exporter.outputFileType = .mp4
+            exporter.shouldOptimizeForNetworkUse = true
+
+            // Export the video asynchronously
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                exporter.exportAsynchronously {
+                    switch exporter.status {
+                    case .completed:
+                        continuation.resume()
+                    case .failed, .cancelled:
+                        let error = exporter.error ?? NSError(domain: "HybridMediaKit", code: -1, userInfo: [NSLocalizedDescriptionKey: "Unknown error during export"])
+                        continuation.resume(throwing: error)
+                    default:
+                        break
+                    }
+                }
+            }
+
+            // Return the output file path
+            return outputURL.path
+        }
+    }
+
     // Helper function to determine if the path is a remote URL and download if necessary
     private func getLocalFilePath(_ pathOrUrl: String) async throws -> String {
         if let url = URL(string: pathOrUrl), url.scheme == "http" || url.scheme == "https" {

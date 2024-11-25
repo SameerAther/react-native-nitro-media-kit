@@ -12,6 +12,7 @@
 #include <NitroModules/Promise.hpp>
 #include <string>
 #include <NitroModules/JPromise.hpp>
+#include <vector>
 
 namespace margelo::nitro::mediakit {
 
@@ -46,6 +47,30 @@ namespace margelo::nitro::mediakit {
   std::shared_ptr<Promise<std::string>> JHybridMediaKitSpec::convertImageToVideo(const std::string& image, double duration) {
     static const auto method = _javaPart->getClass()->getMethod<jni::local_ref<JPromise::javaobject>(jni::alias_ref<jni::JString> /* image */, double /* duration */)>("convertImageToVideo");
     auto __result = method(_javaPart, jni::make_jstring(image), duration);
+    return [&]() {
+      auto __promise = Promise<std::string>::create();
+      __result->cthis()->addOnResolvedListener([=](const jni::alias_ref<jni::JObject>& __boxedResult) {
+        auto __result = jni::static_ref_cast<jni::JString>(__boxedResult);
+        __promise->resolve(__result->toStdString());
+      });
+      __result->cthis()->addOnRejectedListener([=](const jni::alias_ref<jni::JThrowable>& __throwable) {
+        jni::JniException __jniError(__throwable);
+        __promise->reject(std::move(__jniError));
+      });
+      return __promise;
+    }();
+  }
+  std::shared_ptr<Promise<std::string>> JHybridMediaKitSpec::mergeVideos(const std::vector<std::string>& videos) {
+    static const auto method = _javaPart->getClass()->getMethod<jni::local_ref<JPromise::javaobject>(jni::alias_ref<jni::JArrayClass<jni::JString>> /* videos */)>("mergeVideos");
+    auto __result = method(_javaPart, [&]() {
+      size_t __size = videos.size();
+      jni::local_ref<jni::JArrayClass<jni::JString>> __array = jni::JArrayClass<jni::JString>::newArray(__size);
+      for (size_t __i = 0; __i < __size; __i++) {
+        const auto& __element = videos[__i];
+        __array->setElement(__i, *jni::make_jstring(__element));
+      }
+      return __array;
+    }());
     return [&]() {
       auto __promise = Promise<std::string>::create();
       __result->cthis()->addOnResolvedListener([=](const jni::alias_ref<jni::JObject>& __boxedResult) {
