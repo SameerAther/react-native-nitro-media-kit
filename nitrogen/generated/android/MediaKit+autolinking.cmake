@@ -28,7 +28,9 @@ target_sources(
   ../nitrogen/generated/android/MediaKitOnLoad.cpp
   # Shared Nitrogen C++ sources
   ../nitrogen/generated/shared/c++/HybridMediaKitSpec.cpp
+  ../nitrogen/generated/shared/c++/HybridMediaKitSpec.cpp
   # Android-specific Nitrogen C++ sources
+  ../nitrogen/generated/android/c++/JHybridMediaKitSpec.cpp
   ../nitrogen/generated/android/c++/JHybridMediaKitSpec.cpp
 )
 

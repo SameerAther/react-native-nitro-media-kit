@@ -108,178 +108,21 @@ class HybridMediaKit: HybridMediaKitSpec {
         }
     }
 
-    public func mergeVideos(videos: [String]) -> Promise<String> {
-    return Promise.async {
-        var localVideoPaths = [String]()
-        for videoPathOrUrl in videos {
-            let localPath = try await self.getLocalFilePath(videoPathOrUrl)
-            localVideoPaths.append(localPath)
-            print("Local video path: \(localPath)")
-        }
-        
-        // Step 2: Create an AVMutableComposition
-        let composition = AVMutableComposition()
-        var currentTime = CMTime.zero
-        
-        // Video and audio tracks in the composition
-        guard let compositionVideoTrack = composition.addMutableTrack(
-            withMediaType: .video,
-            preferredTrackID: kCMPersistentTrackID_Invalid
-        ) else {
-            throw NSError(domain: "HybridMediaKit", code: -1, userInfo: [NSLocalizedDescriptionKey: "Cannot create video track"])
-        }
-        
-        var compositionAudioTrack: AVMutableCompositionTrack? = nil
-        
-        // Step 3: Loop through each video and insert it into the composition
-        for localVideoPath in localVideoPaths {
-            let videoURL = URL(fileURLWithPath: localVideoPath)
-            let asset = AVAsset(url: videoURL)
-            
-            if !asset.isReadable {
-                throw NSError(
-                    domain: "HybridMediaKit",
-                    code: -1,
-                    userInfo: [NSLocalizedDescriptionKey: "Asset is not readable at \(videoURL.path)"]
-                )
-            }
-            
-            do {
-                // Load asset properties
-                let tracks = try await asset.load(.tracks)
-                let duration = try await asset.load(.duration)
-                
-                if duration == .zero {
-                    throw NSError(
-                        domain: "HybridMediaKit",
-                        code: -1,
-                        userInfo: [NSLocalizedDescriptionKey: "Asset duration is zero at \(videoURL.path)"]
-                    )
-                }
-                
-                let timeRange = CMTimeRange(start: .zero, duration: duration)
-                
-                // Insert video track
-                if let assetVideoTrack = asset.tracks(withMediaType: .video).first {
-                    try compositionVideoTrack.insertTimeRange(
-                        timeRange,
-                        of: assetVideoTrack,
-                        at: currentTime
-                    )
-                } else {
-                    throw NSError(
-                        domain: "HybridMediaKit",
-                        code: -1,
-                        userInfo: [NSLocalizedDescriptionKey: "No video track found in asset at \(videoURL.path)"]
-                    )
-                }
-                
-                // Insert audio track if available
-                if let assetAudioTrack = asset.tracks(withMediaType: .audio).first {
-                    if compositionAudioTrack == nil {
-                        compositionAudioTrack = composition.addMutableTrack(
-                            withMediaType: .audio,
-                            preferredTrackID: kCMPersistentTrackID_Invalid
-                        )
-                    }
-                    try compositionAudioTrack?.insertTimeRange(
-                        timeRange,
-                        of: assetAudioTrack,
-                        at: currentTime
-                    )
-                }
-                
-                // Update current time
-                currentTime = CMTimeAdd(currentTime, duration)
-                
-                print("Successfully added asset at \(videoURL.path)")
-                
-            } catch {
-                print("Error processing asset at \(videoURL.path): \(error.localizedDescription)")
-                throw error
-            }
-        }
-        
-        // Step 4: Export the merged video
-        // Save to Documents directory
-        let documentsDirectory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
-        let outputURL = documentsDirectory.appendingPathComponent("merged_video_\(Int(Date().timeIntervalSince1970)).mp4")
-        
-        // Remove existing file if necessary
-        if FileManager.default.fileExists(atPath: outputURL.path) {
-            try FileManager.default.removeItem(at: outputURL)
-        }
-        
-        // Set up the exporter
-        guard let exporter = AVAssetExportSession(asset: composition, presetName: AVAssetExportPresetHighestQuality) else {
-            throw NSError(domain: "HybridMediaKit", code: -1, userInfo: [NSLocalizedDescriptionKey: "Cannot create AVAssetExportSession"])
-        }
-        exporter.outputURL = outputURL
-        exporter.outputFileType = .mp4
-        exporter.shouldOptimizeForNetworkUse = true
-        
-        // Export the video asynchronously
-        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-            exporter.exportAsynchronously {
-                switch exporter.status {
-                case .completed:
-                    print("Export completed successfully")
-                    continuation.resume()
-                case .failed:
-                    if let error = exporter.error {
-                        print("Export failed with error: \(error.localizedDescription)")
-                        continuation.resume(throwing: error)
-                    } else {
-                        let error = NSError(domain: "HybridMediaKit", code: -1, userInfo: [NSLocalizedDescriptionKey: "Unknown error during export"])
-                        continuation.resume(throwing: error)
-                    }
-                case .cancelled:
-                    print("Export cancelled")
-                    let error = NSError(domain: "HybridMediaKit", code: -1, userInfo: [NSLocalizedDescriptionKey: "Export cancelled"])
-                    continuation.resume(throwing: error)
-                default:
-                    break
-                }
-            }
-        }
-        
-        // Log and return the output file path
-        print("Merged video saved at path: \(outputURL.path)")
-        return outputURL.path
-    }
-}
-
-
     // Helper function to determine if the path is a remote URL and download if necessary
     private func getLocalFilePath(_ pathOrUrl: String) async throws -> String {
-    if let url = URL(string: pathOrUrl), url.scheme == "http" || url.scheme == "https" {
-        // Download the file asynchronously
-        let (data, response) = try await URLSession.shared.data(from: url)
-        
-        // Check for HTTP errors
-        if let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode != 200 {
-            throw NSError(domain: "HybridMediaKit", code: httpResponse.statusCode, userInfo: [NSLocalizedDescriptionKey: "Failed to download file: HTTP \(httpResponse.statusCode)"])
+        if let url = URL(string: pathOrUrl), url.scheme == "http" || url.scheme == "https" {
+            // Download the file asynchronously
+            let (data, _) = try await URLSession.shared.data(from: url)
+            // Save the data to a temporary file
+            let tempDir = NSTemporaryDirectory()
+            let tempFilePath = URL(fileURLWithPath: tempDir).appendingPathComponent(UUID().uuidString)
+            try data.write(to: tempFilePath)
+            return tempFilePath.path
+        } else {
+            // It's a local file path
+            return pathOrUrl
         }
-        
-        // Save the data to a temporary file
-        let tempDir = NSTemporaryDirectory()
-        let tempFilePath = URL(fileURLWithPath: tempDir).appendingPathComponent(UUID().uuidString + ".mp4")
-        try data.write(to: tempFilePath)
-        
-        // Log file size
-        let fileSize = try FileManager.default.attributesOfItem(atPath: tempFilePath.path)[.size] as? Int64 ?? 0
-        print("Downloaded file size: \(fileSize) bytes at path: \(tempFilePath.path)")
-        
-        return tempFilePath.path
-    } else {
-        // It's a local file path
-        // Verify the file exists
-        if !FileManager.default.fileExists(atPath: pathOrUrl) {
-            throw NSError(domain: "HybridMediaKit", code: -1, userInfo: [NSLocalizedDescriptionKey: "File does not exist at path: \(pathOrUrl)"])
-        }
-        return pathOrUrl
     }
-}
 
     // Helper function to write frames asynchronously
     private func writeFrames(

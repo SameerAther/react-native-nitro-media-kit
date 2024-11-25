@@ -34,5 +34,4 @@ public protocol HybridMediaKitSpec: AnyObject, HybridObjectSpec {
   // Methods
   func add(a: Double, b: Double) throws -> Double
   func convertImageToVideo(image: String, duration: Double) throws -> Promise<String>
-  func mergeVideos(videos: [String]) throws -> Promise<String>
 }

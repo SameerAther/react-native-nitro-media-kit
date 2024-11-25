@@ -22,7 +22,6 @@ namespace MediaKit { class HybridMediaKitSpecCxx; }
 #include <functional>
 #include <memory>
 #include <string>
-#include <vector>
 
 /**
  * Contains specialized versions of C++ templated types so they can be accessed from Swift,
@@ -93,17 +92,6 @@ namespace margelo::nitro::mediakit::bridge::swift {
   }
   inline std::shared_ptr<Func_void_std__exception_Wrapper> share_Func_void_std__exception(const Func_void_std__exception& value) {
     return std::make_shared<Func_void_std__exception_Wrapper>(value);
-  }
-  
-  // pragma MARK: std::vector<std::string>
-  /**
-   * Specialized version of `std::vector<std::string>`.
-   */
-  using std__vector_std__string_ = std::vector<std::string>;
-  inline std::vector<std::string> create_std__vector_std__string_(size_t size) {
-    std::vector<std::string> vector;
-    vector.reserve(size);
-    return vector;
   }
   
   // pragma MARK: std::shared_ptr<margelo::nitro::mediakit::HybridMediaKitSpec>
