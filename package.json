@@ -1,7 +1,7 @@
 {
   "name": "react-native-nitro-media-kit",
   "version": "0.0.1",
-  "description": "A template for Nitro Modules.",
+  "description": "A React Native module for advanced media processing using Nitro Modules.",
   "main": "lib/index",
   "module": "lib/index",
   "types": "lib/index.d.ts",
@@ -34,20 +34,16 @@
     "typescript": "tsc",
     "specs": "tsc && nitro-codegen --logLevel=\"debug\""
   },
-  "keywords": [
-    "react-native",
-    "nitro"
-  ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/mrousavy/nitro.git"
+    "url": "https://github.com/SameerAther/react-native-nitro-media-kit.git"
   },
-  "author": "Marc Rousavy <me@mrousavy.com> (https://github.com/mrousavy)",
+  "author": "Sameer Ather <samather66@gmail.com> (https://github.com/SameerAther)",
   "license": "MIT",
   "bugs": {
-    "url": "https://github.com/mrousavy/nitro/issues"
+    "url": "https://github.com/SameerAther/react-native-nitro-media-kit/issues"
   },
-  "homepage": "https://github.com/mrousavy/nitro#readme",
+  "homepage": "https://github.com/SameerAther/react-native-nitro-media-kit#readme",
   "publishConfig": {
     "registry": "https://registry.npmjs.org/"
   },
@@ -103,5 +99,17 @@
     "trailingComma": "es5",
     "useTabs": false,
     "semi": false
-  }
+  },
+  "keywords": [
+    "react-native",
+    "media-processing",
+    "video",
+    "image",
+    "video-processing",
+    "react-native-nitro",
+    "react-native-nitro-media-kit",
+    "react-native-nitro-modules",
+    "react-native-ffmpeg",
+    "react-native-ffmpeg-kit"
+  ]
 }
