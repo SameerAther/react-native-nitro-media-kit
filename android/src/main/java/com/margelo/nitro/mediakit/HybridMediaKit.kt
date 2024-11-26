@@ -29,10 +29,6 @@ class HybridMediaKit : HybridMediaKitSpec() {
     override val pi: Double
         get() = PI
 
-    override fun add(a: Double, b: Double): Double {
-        return a + b
-    }
-
     // Obtain application context from NitroModules
     private val applicationContext = NitroModules.applicationContext
         ?: throw IllegalStateException("Application context is null")

@@ -20,10 +20,6 @@ class HybridMediaKit: HybridMediaKitSpec {
         return Double.pi
     }
 
-    public func add(a: Double, b: Double) -> Double {
-        return a + b
-    }
-
     public func convertImageToVideo(image: String, duration: Double) -> Promise<String> {
         return Promise.async {
             // This runs on a separate thread and can use `await` syntax

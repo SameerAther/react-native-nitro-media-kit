@@ -104,10 +104,16 @@ public class HybridMediaKitSpecCxx {
 
   // Methods
   @inline(__always)
-  public func add(a: Double, b: Double) -> Double {
+  public func convertImageToVideo(image: std.string, duration: Double) -> bridge.std__shared_ptr_Promise_std__string__ {
     do {
-      let __result = try self.__implementation.add(a: a, b: b)
-      return __result
+      let __result = try self.__implementation.convertImageToVideo(image: String(image), duration: duration)
+      return { () -> bridge.std__shared_ptr_Promise_std__string__ in
+        let __promise = bridge.create_std__shared_ptr_Promise_std__string__()
+        __result
+          .then({ __result in __promise.pointee.resolve(std.string(__result)) })
+          .catch({ __error in __promise.pointee.reject(__error.toCpp()) })
+        return __promise
+      }()
     } catch {
       let __message = "\(error.localizedDescription)"
       fatalError("Swift errors can currently not be propagated to C++! See https://github.com/swiftlang/swift/issues/75290 (Error: \(__message))")
@@ -115,9 +121,9 @@ public class HybridMediaKitSpecCxx {
   }
   
   @inline(__always)
-  public func convertImageToVideo(image: std.string, duration: Double) -> bridge.std__shared_ptr_Promise_std__string__ {
+  public func mergeVideos(videos: bridge.std__vector_std__string_) -> bridge.std__shared_ptr_Promise_std__string__ {
     do {
-      let __result = try self.__implementation.convertImageToVideo(image: String(image), duration: duration)
+      let __result = try self.__implementation.mergeVideos(videos: videos.map({ __item in String(__item) }))
       return { () -> bridge.std__shared_ptr_Promise_std__string__ in
         let __promise = bridge.create_std__shared_ptr_Promise_std__string__()
         __result

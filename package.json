@@ -1,6 +1,6 @@
 {
   "name": "react-native-nitro-media-kit",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "description": "A React Native module for advanced media processing using Nitro Modules.",
   "main": "lib/index",
   "module": "lib/index",

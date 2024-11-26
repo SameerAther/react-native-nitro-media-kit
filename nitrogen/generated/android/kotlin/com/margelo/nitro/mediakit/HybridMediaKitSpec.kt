@@ -45,11 +45,11 @@ abstract class HybridMediaKitSpec: HybridObject() {
   // Methods
   @DoNotStrip
   @Keep
-  abstract fun add(a: Double, b: Double): Double
+  abstract fun convertImageToVideo(image: String, duration: Double): Promise<String>
   
   @DoNotStrip
   @Keep
-  abstract fun convertImageToVideo(image: String, duration: Double): Promise<String>
+  abstract fun mergeVideos(videos: Array<String>): Promise<String>
 
   private external fun initHybrid(): HybridData
 

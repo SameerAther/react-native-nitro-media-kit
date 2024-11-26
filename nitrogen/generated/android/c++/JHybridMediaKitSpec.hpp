@@ -51,8 +51,8 @@ namespace margelo::nitro::mediakit {
 
   public:
     // Methods
-    double add(double a, double b) override;
     std::shared_ptr<Promise<std::string>> convertImageToVideo(const std::string& image, double duration) override;
+    std::shared_ptr<Promise<std::string>> mergeVideos(const std::vector<std::string>& videos) override;
 
   private:
     friend HybridBase;
