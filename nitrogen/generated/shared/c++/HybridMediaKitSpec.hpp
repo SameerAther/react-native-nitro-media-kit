@@ -46,12 +46,13 @@ namespace margelo::nitro::mediakit {
 
     public:
       // Properties
-      virtual double getPi() = 0;
+      
 
     public:
       // Methods
       virtual std::shared_ptr<Promise<std::string>> convertImageToVideo(const std::string& image, double duration) = 0;
       virtual std::shared_ptr<Promise<std::string>> mergeVideos(const std::vector<std::string>& videos) = 0;
+      virtual std::shared_ptr<Promise<std::string>> watermarkVideo(const std::string& video, const std::string& watermark, const std::string& position) = 0;
 
     protected:
       // Hybrid Setup

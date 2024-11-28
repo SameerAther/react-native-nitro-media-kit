@@ -14,9 +14,9 @@ namespace margelo::nitro::mediakit {
     HybridObject::loadHybridMethods();
     // load custom methods/properties
     registerHybrids(this, [](Prototype& prototype) {
-      prototype.registerHybridGetter("pi", &HybridMediaKitSpec::getPi);
       prototype.registerHybridMethod("convertImageToVideo", &HybridMediaKitSpec::convertImageToVideo);
       prototype.registerHybridMethod("mergeVideos", &HybridMediaKitSpec::mergeVideos);
+      prototype.registerHybridMethod("watermarkVideo", &HybridMediaKitSpec::watermarkVideo);
     });
   }
 

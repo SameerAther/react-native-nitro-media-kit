@@ -22,8 +22,8 @@ class EglHelper {
     private var eglSurface: EGLSurface? = null
     private var eglConfig: EGLConfig? = null
     private var surface: Surface? = null
-private var videoTextureId: Int = 0
-private var videoSurfaceTexture: SurfaceTexture? = null
+    private var videoTextureId: Int = 0
+    private var videoSurfaceTexture: SurfaceTexture? = null
 
     private var program: Int = 0
     private var textureId: Int = 0
@@ -31,34 +31,37 @@ private var videoSurfaceTexture: SurfaceTexture? = null
     private var textureBuffer: FloatBuffer? = null
 
     private val vertexShaderCode = """
-    attribute vec4 vPosition;
-    attribute vec2 vTexCoord;
-    varying vec2 outTexCoord;
-    void main() {
-        gl_Position = vPosition;
-        outTexCoord = vTexCoord;
+        attribute vec4 vPosition;
+        attribute vec2 vTexCoord;
+        varying vec2 outTexCoord;
+        void main() {
+            gl_Position = vPosition;
+            outTexCoord = vTexCoord;
+        }
+    """.trimIndent()
+
+    fun getVideoSurface(): Surface {
+        return Surface(videoSurfaceTexture)
     }
-""".trimIndent()
 
     private val fragmentShaderCode = """
-    #extension GL_OES_EGL_image_external : require
-    precision mediump float;
-    varying vec2 outTexCoord;
-    uniform samplerExternalOES sVideoTexture;
-    uniform sampler2D sOverlayTexture;
-    uniform vec2 uOverlayPosition;
-    uniform vec2 uOverlaySize;
-    void main() {
-        vec4 videoColor = texture2D(sVideoTexture, outTexCoord);
-        vec2 overlayCoord = (outTexCoord - uOverlayPosition) / uOverlaySize;
-        vec4 overlayColor = texture2D(sOverlayTexture, overlayCoord);
-        // Ensure the overlay only appears within its bounds
-        float inOverlay = step(0.0, overlayCoord.x) * step(0.0, overlayCoord.y) * step(overlayCoord.x, 1.0) * step(overlayCoord.y, 1.0);
-        overlayColor.a *= inOverlay;
-        gl_FragColor = mix(videoColor, overlayColor, overlayColor.a);
-    }
-""".trimIndent()
-
+        #extension GL_OES_EGL_image_external : require
+        precision mediump float;
+        varying vec2 outTexCoord;
+        uniform samplerExternalOES sVideoTexture;
+        uniform sampler2D sOverlayTexture;
+        uniform vec2 uOverlayPosition;
+        uniform vec2 uOverlaySize;
+        void main() {
+            vec4 videoColor = texture2D(sVideoTexture, outTexCoord);
+            vec2 overlayCoord = (outTexCoord - uOverlayPosition) / uOverlaySize;
+            vec4 overlayColor = texture2D(sOverlayTexture, overlayCoord);
+            // Ensure the overlay only appears within its bounds
+            float inOverlay = step(0.0, overlayCoord.x) * step(0.0, overlayCoord.y) * step(overlayCoord.x, 1.0) * step(overlayCoord.y, 1.0);
+            overlayColor.a *= inOverlay;
+            gl_FragColor = mix(videoColor, overlayColor, overlayColor.a);
+        }
+    """.trimIndent()
 
     fun createEglContext(surface: Surface) {
         this.surface = surface
@@ -94,21 +97,21 @@ private var videoSurfaceTexture: SurfaceTexture? = null
 
         initGL()
     }
-private fun createTextBitmap(text: String, textSize: Float, textColor: Int): Bitmap {
-    val textPaint = Paint().apply {
-        color = textColor
-        this.textSize = textSize
-        isAntiAlias = true
-        textAlign = Paint.Align.LEFT
-    }
-    val textBounds = Rect()
-    textPaint.getTextBounds(text, 0, text.length, textBounds)
-    val bitmap = Bitmap.createBitmap(textBounds.width(), textBounds.height(), Bitmap.Config.ARGB_8888)
-    val canvas = Canvas(bitmap)
-    canvas.drawText(text, -textBounds.left.toFloat(), -textBounds.top.toFloat(), textPaint)
-    return bitmap
-}
 
+    fun createTextBitmap(text: String, textSize: Float, textColor: Int): Bitmap {
+        val textPaint = Paint().apply {
+            color = textColor
+            this.textSize = textSize
+            isAntiAlias = true
+            textAlign = Paint.Align.LEFT
+        }
+        val textBounds = Rect()
+        textPaint.getTextBounds(text, 0, text.length, textBounds)
+        val bitmap = Bitmap.createBitmap(textBounds.width(), textBounds.height(), Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(bitmap)
+        canvas.drawText(text, -textBounds.left.toFloat(), -textBounds.top.toFloat(), textPaint)
+        return bitmap
+    }
 
     private fun initGL() {
         // Prepare shaders and OpenGL program
@@ -151,7 +154,7 @@ private fun createTextBitmap(text: String, textSize: Float, textColor: Int): Bit
                 position(0)
             }
 
-        // Generate texture
+        // Generate texture for overlay
         val textures = IntArray(1)
         GLES20.glGenTextures(1, textures, 0)
         textureId = textures[0]
@@ -159,67 +162,73 @@ private fun createTextBitmap(text: String, textSize: Float, textColor: Int): Bit
         GLES20.glTexParameterf(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_LINEAR.toFloat())
         GLES20.glTexParameterf(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_LINEAR.toFloat())
         GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, 0)
-        val videoTextures = IntArray(1)
-    GLES20.glGenTextures(1, videoTextures, 0)
-    videoTextureId = videoTextures[0]
-    GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, videoTextureId)
-    GLES20.glTexParameterf(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_LINEAR.toFloat())
-    GLES20.glTexParameterf(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_LINEAR.toFloat())
-    GLES20.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES20.GL_TEXTURE_WRAP_S, GLES20.GL_CLAMP_TO_EDGE)
-    GLES20.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_CLAMP_TO_EDGE)
 
-    // Create SurfaceTexture
-    videoSurfaceTexture = SurfaceTexture(videoTextureId)
+        // Generate texture for video
+        val videoTextures = IntArray(1)
+        GLES20.glGenTextures(1, videoTextures, 0)
+        videoTextureId = videoTextures[0]
+        GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, videoTextureId)
+        GLES20.glTexParameterf(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_LINEAR.toFloat())
+        GLES20.glTexParameterf(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_LINEAR.toFloat())
+        GLES20.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES20.GL_TEXTURE_WRAP_S, GLES20.GL_CLAMP_TO_EDGE)
+        GLES20.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_CLAMP_TO_EDGE)
+
+        // Create SurfaceTexture
+        videoSurfaceTexture = SurfaceTexture(videoTextureId)
     }
 
     fun drawFrameWithOverlay(overlayBitmap: Bitmap?, posX: Float, posY: Float, videoWidth: Int, videoHeight: Int) {
-    // Update the video texture
-    videoSurfaceTexture?.updateTexImage()
+        // Update the video texture
+        videoSurfaceTexture?.updateTexImage()
 
-    GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
-    GLES20.glUseProgram(program)
+        GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
+        GLES20.glUseProgram(program)
 
-    // Prepare position data
-    val positionHandle = GLES20.glGetAttribLocation(program, "vPosition")
-    GLES20.glEnableVertexAttribArray(positionHandle)
-    GLES20.glVertexAttribPointer(positionHandle, 2, GLES20.GL_FLOAT, false, 0, vertexBuffer)
+        // Prepare position data
+        val positionHandle = GLES20.glGetAttribLocation(program, "vPosition")
+        GLES20.glEnableVertexAttribArray(positionHandle)
+        GLES20.glVertexAttribPointer(positionHandle, 2, GLES20.GL_FLOAT, false, 0, vertexBuffer)
 
-    // Prepare texture coordinate data
-    val texCoordHandle = GLES20.glGetAttribLocation(program, "vTexCoord")
-    GLES20.glEnableVertexAttribArray(texCoordHandle)
-    GLES20.glVertexAttribPointer(texCoordHandle, 2, GLES20.GL_FLOAT, false, 0, textureBuffer)
+        // Prepare texture coordinate data
+        val texCoordHandle = GLES20.glGetAttribLocation(program, "vTexCoord")
+        GLES20.glEnableVertexAttribArray(texCoordHandle)
+        GLES20.glVertexAttribPointer(texCoordHandle, 2, GLES20.GL_FLOAT, false, 0, textureBuffer)
 
-    // Bind video texture
-    GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
-    GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, videoTextureId)
-    val videoTextureHandle = GLES20.glGetUniformLocation(program, "sVideoTexture")
-    GLES20.glUniform1i(videoTextureHandle, 0)
+        // Bind video texture
+        GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
+        GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, videoTextureId)
+        val videoTextureHandle = GLES20.glGetUniformLocation(program, "sVideoTexture")
+        GLES20.glUniform1i(videoTextureHandle, 0)
 
-    // Bind overlay texture if available
-    if (overlayBitmap != null) {
-        GLES20.glActiveTexture(GLES20.GL_TEXTURE1)
-        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, textureId)
-        GLUtils.texImage2D(GLES20.GL_TEXTURE_2D, 0, overlayBitmap, 0)
-        val overlayTextureHandle = GLES20.glGetUniformLocation(program, "sOverlayTexture")
-        GLES20.glUniform1i(overlayTextureHandle, 1)
-    }
+        // Bind overlay texture if available
+        if (overlayBitmap != null) {
+            GLES20.glActiveTexture(GLES20.GL_TEXTURE1)
+            GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, textureId)
+            GLUtils.texImage2D(GLES20.GL_TEXTURE_2D, 0, overlayBitmap, 0)
+            val overlayTextureHandle = GLES20.glGetUniformLocation(program, "sOverlayTexture")
+            GLES20.glUniform1i(overlayTextureHandle, 1)
+        }
 
-    // Set overlay position and size
-    val overlayPositionHandle = GLES20.glGetUniformLocation(program, "uOverlayPosition")
-    GLES20.glUniform2f(overlayPositionHandle, posX / videoWidth, posY / videoHeight)
-    val overlaySizeHandle = GLES20.glGetUniformLocation(program, "uOverlaySize")
-    GLES20.glUniform2f(overlaySizeHandle, (overlayBitmap?.width?.toFloat() ?: 0f) / videoWidth, (overlayBitmap?.height?.toFloat() ?: 0f) / videoHeight)
+        // Set overlay position and size
+        val overlayPositionHandle = GLES20.glGetUniformLocation(program, "uOverlayPosition")
+        GLES20.glUniform2f(overlayPositionHandle, posX / videoWidth, posY / videoHeight)
+        val overlaySizeHandle = GLES20.glGetUniformLocation(program, "uOverlaySize")
+        GLES20.glUniform2f(
+            overlaySizeHandle,
+            (overlayBitmap?.width?.toFloat() ?: 0f) / videoWidth,
+            (overlayBitmap?.height?.toFloat() ?: 0f) / videoHeight
+        )
 
-    // Draw the quad
-    GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)
+        // Draw the quad
+        GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)
 
-    // Disable attribute arrays
-    GLES20.glDisableVertexAttribArray(positionHandle)
-    GLES20.glDisableVertexAttribArray(texCoordHandle)
+        // Disable attribute arrays
+        GLES20.glDisableVertexAttribArray(positionHandle)
+        GLES20.glDisableVertexAttribArray(texCoordHandle)
 
-    // Unbind textures
-    GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, 0)
-    GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, 0)
+        // Unbind textures
+        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, 0)
+        GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, 0)
 }
 
 
@@ -267,27 +276,27 @@ private fun createTextBitmap(text: String, textSize: Float, textColor: Int): Bit
     }
 
     fun getVideoSurfaceTexture(): SurfaceTexture? {
-    return videoSurfaceTexture
-}
+        return videoSurfaceTexture
+    }
 
-fun setPresentationTime(presentationTimeNs: Long) {
-    EGLExt.eglPresentationTimeANDROID(eglDisplay, eglSurface, presentationTimeNs)
-}
+    fun setPresentationTime(presentationTimeNs: Long) {
+        EGLExt.eglPresentationTimeANDROID(eglDisplay, eglSurface, presentationTimeNs)
+    }
 
-fun swapBuffers() {
-    EGL14.eglSwapBuffers(eglDisplay, eglSurface)
-}
-
+    fun swapBuffers() {
+        EGL14.eglSwapBuffers(eglDisplay, eglSurface)
+    }
 
     fun release() {
         GLES20.glDeleteProgram(program)
         GLES20.glDeleteTextures(1, intArrayOf(textureId), 0)
+        GLES20.glDeleteTextures(1, intArrayOf(videoTextureId), 0)
         EGL14.eglMakeCurrent(eglDisplay, EGL14.EGL_NO_SURFACE, EGL14.EGL_NO_SURFACE, EGL14.EGL_NO_CONTEXT)
         EGL14.eglDestroySurface(eglDisplay, eglSurface)
         EGL14.eglDestroyContext(eglDisplay, eglContext)
         EGL14.eglTerminate(eglDisplay)
         videoSurfaceTexture?.release()
-    videoSurfaceTexture = null
+        videoSurfaceTexture = null
         surface?.release()
     }
 }

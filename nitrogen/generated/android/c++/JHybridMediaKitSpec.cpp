@@ -32,11 +32,7 @@ namespace margelo::nitro::mediakit {
   }
 
   // Properties
-  double JHybridMediaKitSpec::getPi() {
-    static const auto method = _javaPart->getClass()->getMethod<double()>("getPi");
-    auto __result = method(_javaPart);
-    return __result;
-  }
+  
 
   // Methods
   std::shared_ptr<Promise<std::string>> JHybridMediaKitSpec::convertImageToVideo(const std::string& image, double duration) {
@@ -66,6 +62,22 @@ namespace margelo::nitro::mediakit {
       }
       return __array;
     }());
+    return [&]() {
+      auto __promise = Promise<std::string>::create();
+      __result->cthis()->addOnResolvedListener([=](const jni::alias_ref<jni::JObject>& __boxedResult) {
+        auto __result = jni::static_ref_cast<jni::JString>(__boxedResult);
+        __promise->resolve(__result->toStdString());
+      });
+      __result->cthis()->addOnRejectedListener([=](const jni::alias_ref<jni::JThrowable>& __throwable) {
+        jni::JniException __jniError(__throwable);
+        __promise->reject(std::move(__jniError));
+      });
+      return __promise;
+    }();
+  }
+  std::shared_ptr<Promise<std::string>> JHybridMediaKitSpec::watermarkVideo(const std::string& video, const std::string& watermark, const std::string& position) {
+    static const auto method = _javaPart->getClass()->getMethod<jni::local_ref<JPromise::javaobject>(jni::alias_ref<jni::JString> /* video */, jni::alias_ref<jni::JString> /* watermark */, jni::alias_ref<jni::JString> /* position */)>("watermarkVideo");
+    auto __result = method(_javaPart, jni::make_jstring(video), jni::make_jstring(watermark), jni::make_jstring(position));
     return [&]() {
       auto __promise = Promise<std::string>::create();
       __result->cthis()->addOnResolvedListener([=](const jni::alias_ref<jni::JObject>& __boxedResult) {

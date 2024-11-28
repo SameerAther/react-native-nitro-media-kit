@@ -38,9 +38,7 @@ abstract class HybridMediaKitSpec: HybridObject() {
   }
 
   // Properties
-  @get:DoNotStrip
-  @get:Keep
-  abstract val pi: Double
+  
 
   // Methods
   @DoNotStrip
@@ -50,6 +48,10 @@ abstract class HybridMediaKitSpec: HybridObject() {
   @DoNotStrip
   @Keep
   abstract fun mergeVideos(videos: Array<String>): Promise<String>
+  
+  @DoNotStrip
+  @Keep
+  abstract fun watermarkVideo(video: String, watermark: String, position: String): Promise<String>
 
   private external fun initHybrid(): HybridData
 

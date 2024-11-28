@@ -16,10 +16,6 @@ class HybridMediaKit: HybridMediaKitSpec {
         return getSizeOf(self)
     }
 
-    public var pi: Double {
-        return Double.pi
-    }
-
     public func convertImageToVideo(image: String, duration: Double) -> Promise<String> {
         return Promise.async {
             // This runs on a separate thread and can use `await` syntax

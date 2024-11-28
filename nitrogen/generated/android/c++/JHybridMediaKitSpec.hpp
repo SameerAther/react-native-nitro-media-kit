@@ -47,12 +47,13 @@ namespace margelo::nitro::mediakit {
 
   public:
     // Properties
-    double getPi() override;
+    
 
   public:
     // Methods
     std::shared_ptr<Promise<std::string>> convertImageToVideo(const std::string& image, double duration) override;
     std::shared_ptr<Promise<std::string>> mergeVideos(const std::vector<std::string>& videos) override;
+    std::shared_ptr<Promise<std::string>> watermarkVideo(const std::string& video, const std::string& watermark, const std::string& position) override;
 
   private:
     friend HybridBase;

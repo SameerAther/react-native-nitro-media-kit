@@ -29,9 +29,10 @@ import NitroModules
  */
 public protocol HybridMediaKitSpec: AnyObject, HybridObjectSpec {
   // Properties
-  var pi: Double { get }
+  
 
   // Methods
   func convertImageToVideo(image: String, duration: Double) throws -> Promise<String>
   func mergeVideos(videos: [String]) throws -> Promise<String>
+  func watermarkVideo(video: String, watermark: String, position: String) throws -> Promise<String>
 }

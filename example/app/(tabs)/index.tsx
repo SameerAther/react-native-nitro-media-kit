@@ -35,6 +35,19 @@ export default function HomeScreen() {
     }
   }
 
+  const handleWatermark = async () => {
+    try {
+      const video = await mediakit.watermarkVideo(
+        'https://www.sample-videos.com/video321/mp4/720/big_buck_bunny_720p_2mb.mp4',
+        'Sameer Ather',
+        'top-left'
+      )
+      console.log('Merged video saved at:', video)
+    } catch (error) {
+      console.error('Error merging videos:', error)
+    }
+  }
+
   return (
     <ParallaxScrollView
       headerBackgroundColor={{ light: '#A1CEDC', dark: '#1D3D47' }}
@@ -56,6 +69,9 @@ export default function HomeScreen() {
       </ThemedView>
       <ThemedView style={styles.stepContainer}>
         <Button title="Merge Videos" onPress={handleMergeVideos} />
+      </ThemedView>
+      <ThemedView style={styles.stepContainer}>
+        <Button title="Watermark Video" onPress={handleWatermark} />
       </ThemedView>
       <ThemedView style={styles.stepContainer}>
         <ThemedText type="subtitle">Step 1: Try it</ThemedText>

@@ -57,9 +57,7 @@ namespace margelo::nitro::mediakit {
 
   public:
     // Properties
-    inline double getPi() noexcept override {
-      return _swiftPart.getPi();
-    }
+    
 
   public:
     // Methods
@@ -69,6 +67,10 @@ namespace margelo::nitro::mediakit {
     }
     inline std::shared_ptr<Promise<std::string>> mergeVideos(const std::vector<std::string>& videos) override {
       auto __result = _swiftPart.mergeVideos(videos);
+      return __result;
+    }
+    inline std::shared_ptr<Promise<std::string>> watermarkVideo(const std::string& video, const std::string& watermark, const std::string& position) override {
+      auto __result = _swiftPart.watermarkVideo(video, watermark, position);
       return __result;
     }
 
