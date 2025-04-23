@@ -1,0 +1,17 @@
+{
+  "cxxNamespace": ["nitromediakit"],
+  "ios": {
+    "iosModuleName": "NitroMediaKit"
+  },
+  "android": {
+    "androidNamespace": ["nitromediakit"],
+    "androidCxxLibName": "nitromediakit"
+  },
+  "autolinking": {
+    "NitroMediaKit": {
+      "swift": "NitroMediaKit",
+      "kotlin": "NitroMediaKit"
+    }
+  },
+  "ignorePaths": ["node_modules"]
+}
