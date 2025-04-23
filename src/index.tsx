@@ -1,9 +1,5 @@
 import { NitroModules } from 'react-native-nitro-modules';
-import type { NitroMediaKit } from './NitroMediaKit.nitro';
+import type { NitroMediaKit as NitroMediaKitObject } from './NitroMediaKit.nitro';
 
-const NitroMediaKitHybridObject =
-  NitroModules.createHybridObject<NitroMediaKit>('NitroMediaKit');
-
-export function multiply(a: number, b: number): number {
-  return NitroMediaKitHybridObject.multiply(a, b);
-}
+export const NitroMediaKit =
+  NitroModules.createHybridObject<NitroMediaKitObject>('NitroMediaKit');
