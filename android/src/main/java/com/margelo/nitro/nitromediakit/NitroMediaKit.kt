@@ -25,7 +25,6 @@ import android.view.Surface
 import android.graphics.SurfaceTexture
 import android.graphics.Color
 import com.facebook.proguard.annotations.DoNotStrip
-import com.facebook.proguard.annotations.DoNotStrip
 
 @DoNotStrip
 class NitroMediaKit : HybridNitroMediaKitSpec() {
