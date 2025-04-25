@@ -23,6 +23,8 @@ class EglHelper {
     private var eglSurface: EGLSurface? = null
     private var eglConfig: EGLConfig? = null
     private var surface: Surface? = null
+    private var useVideoTextureHandle: Int = 0
+    private var stMatrixHandle: Int = 0     
     private var videoTextureId: Int = 0
     private var videoSurfaceTexture: SurfaceTexture? = null
     private val frameSyncObject = Object()
@@ -39,9 +41,11 @@ class EglHelper {
         attribute vec4 vPosition;
         attribute vec2 vTexCoord;
         varying vec2 outTexCoord;
+        uniform mat4 uSTMatrix;
         void main() {
             gl_Position = vPosition;
-            outTexCoord = vTexCoord;
+            vec4 texCoord = vec4(vTexCoord, 0.0, 1.0);
+            outTexCoord = (uSTMatrix * texCoord).xy;
         }
     """.trimIndent()
 
@@ -55,11 +59,17 @@ class EglHelper {
         varying vec2 outTexCoord;
         uniform samplerExternalOES sVideoTexture;
         uniform sampler2D sOverlayTexture;
+        uniform bool uUseVideoTexture;
+        uniform bool uUseOverlay;
         uniform vec2 uOverlayPosition;
         uniform vec2 uOverlaySize;
-        uniform bool uUseOverlay;
         void main() {
-            vec4 videoColor = texture2D(sVideoTexture, outTexCoord);
+            vec4 color;
+            if (uUseVideoTexture) {
+                color = texture2D(sVideoTexture, outTexCoord);
+            } else {
+                color = texture2D(sOverlayTexture, outTexCoord);
+            }
             if (uUseOverlay) {
                 vec2 overlayCoord = (outTexCoord - uOverlayPosition) / uOverlaySize;
                 overlayCoord = clamp(overlayCoord, vec2(0.0), vec2(1.0));
@@ -67,10 +77,9 @@ class EglHelper {
                 float inOverlay = step(0.0, overlayCoord.x) * step(0.0, overlayCoord.y) *
                                 step(overlayCoord.x, 1.0) * step(overlayCoord.y, 1.0);
                 overlayColor.a *= inOverlay;
-                gl_FragColor = mix(videoColor, overlayColor, overlayColor.a);
-            } else {
-                gl_FragColor = videoColor;
+                color = mix(color, overlayColor, overlayColor.a);
             }
+            gl_FragColor = color;
         }
     """.trimIndent()
 
@@ -140,7 +149,6 @@ class EglHelper {
     private fun initGL() {
         // Set a clear color
         GLES20.glClearColor(0f, 0f, 0f, 1f)
-
         // Enable blending for proper alpha handling on overlay
         GLES20.glEnable(GLES20.GL_BLEND)
         // If your overlay is straight alpha, use this blend func:
@@ -152,11 +160,13 @@ class EglHelper {
         val vertexShader = loadShader(GLES20.GL_VERTEX_SHADER, vertexShaderCode)
         val fragmentShader = loadShader(GLES20.GL_FRAGMENT_SHADER, fragmentShaderCode)
         program = GLES20.glCreateProgram().also {
-            GLES20.glAttachShader(it, vertexShader)
-            GLES20.glAttachShader(it, fragmentShader)
-            GLES20.glLinkProgram(it)
-        }
+                GLES20.glAttachShader(it, vertexShader)
+                GLES20.glAttachShader(it, fragmentShader)
+                GLES20.glLinkProgram(it)
+            }
         useOverlayHandle = GLES20.glGetUniformLocation(program, "uUseOverlay")
+        useVideoTextureHandle = GLES20.glGetUniformLocation(program, "uUseVideoTexture")
+        stMatrixHandle = GLES20.glGetUniformLocation(program, "uSTMatrix")
 
         // Define vertex coordinates for a fullscreen quad
         val vertexCoords = floatArrayOf(
@@ -242,11 +252,15 @@ class EglHelper {
         }
         videoSurfaceTexture?.updateTexImage()
         val timestamp = videoSurfaceTexture?.timestamp ?: 0L
+        val stMatrix = FloatArray(16)
+        videoSurfaceTexture?.getTransformMatrix(stMatrix)
 
         GLES20.glUseProgram(program)
         GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
 
-        GLES20.glUniform1i(useOverlayHandle, 0) // Disable overlay
+        GLES20.glUniform1i(useVideoTextureHandle, 1) // Use video texture
+        GLES20.glUniform1i(useOverlayHandle, 0)      // Disable overlay
+        GLES20.glUniformMatrix4fv(stMatrixHandle, 1, false, stMatrix, 0)
 
         val positionHandle = GLES20.glGetAttribLocation(program, "vPosition")
         GLES20.glEnableVertexAttribArray(positionHandle)
@@ -261,100 +275,64 @@ class EglHelper {
         val videoTextureHandle = GLES20.glGetUniformLocation(program, "sVideoTexture")
         GLES20.glUniform1i(videoTextureHandle, 0)
 
-        // Bind overlay texture (unused but bound for safety)
-        GLES20.glActiveTexture(GLES20.GL_TEXTURE1)
-        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, textureId)
-        val overlayTextureHandle = GLES20.glGetUniformLocation(program, "sOverlayTexture")
-        GLES20.glUniform1i(overlayTextureHandle, 1)
-
         GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)
 
         GLES20.glDisableVertexAttribArray(positionHandle)
         GLES20.glDisableVertexAttribArray(texCoordHandle)
-        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, 0)
         GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, 0)
 
         return timestamp
     }
 
-    fun drawFrameWithOverlay(
-        posX: Float,
-        posY: Float,
-        videoWidth: Int,
-        videoHeight: Int
-    ): Long {
+    fun drawFrameWithOverlay(posX: Float, posY: Float, videoWidth: Int, videoHeight: Int): Long {
         synchronized(frameSyncObject) {
             while (!frameAvailable) {
                 frameSyncObject.wait(1000)
-                if (!frameAvailable) {
-                    throw RuntimeException("Frame wait timed out")
-                }
+                if (!frameAvailable) throw RuntimeException("Frame wait timed out")
             }
             frameAvailable = false
         }
         videoSurfaceTexture?.updateTexImage()
         val timestamp = videoSurfaceTexture?.timestamp ?: 0L
+        val stMatrix = FloatArray(16)
+        videoSurfaceTexture?.getTransformMatrix(stMatrix)
 
         GLES20.glUseProgram(program)
-        checkGlError("glUseProgram")
-
         GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
 
-        // Prepare position data
+        GLES20.glUniform1i(useVideoTextureHandle, 1) // Use video texture
+        GLES20.glUniform1i(useOverlayHandle, 1)     // Enable overlay
+        GLES20.glUniformMatrix4fv(stMatrixHandle, 1, false, stMatrix, 0)
+
         val positionHandle = GLES20.glGetAttribLocation(program, "vPosition")
         GLES20.glEnableVertexAttribArray(positionHandle)
         GLES20.glVertexAttribPointer(positionHandle, 2, GLES20.GL_FLOAT, false, 0, vertexBuffer)
-        checkGlError("glVertexAttribPointer vPosition")
 
-        // Prepare texture coordinate data
         val texCoordHandle = GLES20.glGetAttribLocation(program, "vTexCoord")
         GLES20.glEnableVertexAttribArray(texCoordHandle)
         GLES20.glVertexAttribPointer(texCoordHandle, 2, GLES20.GL_FLOAT, false, 0, textureBuffer)
-        checkGlError("glVertexAttribPointer vTexCoord")
 
-        // Bind video texture
         GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
         GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, videoTextureId)
         val videoTextureHandle = GLES20.glGetUniformLocation(program, "sVideoTexture")
         GLES20.glUniform1i(videoTextureHandle, 0)
-        checkGlError("glBindTexture sVideoTexture")
 
-        // Bind overlay texture
         GLES20.glActiveTexture(GLES20.GL_TEXTURE1)
         GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, textureId)
         val overlayTextureHandle = GLES20.glGetUniformLocation(program, "sOverlayTexture")
         GLES20.glUniform1i(overlayTextureHandle, 1)
-        checkGlError("glBindTexture sOverlayTexture")
 
-        // Adjust overlay position if necessary
         val normalizedPosY = (videoHeight - posY - overlayBitmapHeight) / videoHeight.toFloat()
         val overlayPositionHandle = GLES20.glGetUniformLocation(program, "uOverlayPosition")
-        val useOverlayHandle = GLES20.glGetUniformLocation(program, "uUseOverlay")
-        GLES20.glUniform1i(useOverlayHandle, 1)
-        GLES20.glUniform2f(
-            overlayPositionHandle,
-            posX / videoWidth.toFloat(),
-            normalizedPosY
-        )
+        GLES20.glUniform2f(overlayPositionHandle, posX / videoWidth.toFloat(), normalizedPosY)
 
-        // Set overlay size
         val overlaySizeHandle = GLES20.glGetUniformLocation(program, "uOverlaySize")
-        GLES20.glUniform2f(
-            overlaySizeHandle,
-            overlayBitmapWidth.toFloat() / videoWidth,
-            overlayBitmapHeight.toFloat() / videoHeight
-        )
-        checkGlError("glUniform uOverlayPosition and uOverlaySize")
+        GLES20.glUniform2f(overlaySizeHandle, overlayBitmapWidth.toFloat() / videoWidth, overlayBitmapHeight.toFloat() / videoHeight)
 
-        // Draw the quad
         GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)
-        checkGlError("glDrawArrays")
 
-        // Disable attribute arrays
         GLES20.glDisableVertexAttribArray(positionHandle)
         GLES20.glDisableVertexAttribArray(texCoordHandle)
-
-        // Unbind textures
         GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, 0)
         GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, 0)
 
@@ -363,39 +341,33 @@ class EglHelper {
 
     fun drawFrame(bitmap: Bitmap) {
         GLES20.glUseProgram(program)
-
         GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
 
-        // Bind texture
+        GLES20.glUniform1i(useVideoTextureHandle, 0) // Use overlay texture for image
+        GLES20.glUniform1i(useOverlayHandle, 0)     // Disable overlay
+        // Set identity matrix since no transformation is needed for static images
+        val identityMatrix = FloatArray(16).apply { Matrix.setIdentityM(this, 0) }
+        GLES20.glUniformMatrix4fv(stMatrixHandle, 1, false, identityMatrix, 0)
+
+        GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
         GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, textureId)
         GLUtils.texImage2D(GLES20.GL_TEXTURE_2D, 0, bitmap, 0)
+        val overlayTextureHandle = GLES20.glGetUniformLocation(program, "sOverlayTexture")
+        GLES20.glUniform1i(overlayTextureHandle, 0)
 
-        // Prepare position data
         val positionHandle = GLES20.glGetAttribLocation(program, "vPosition")
         GLES20.glEnableVertexAttribArray(positionHandle)
         GLES20.glVertexAttribPointer(positionHandle, 2, GLES20.GL_FLOAT, false, 0, vertexBuffer)
 
-        // Prepare texture coordinate data
         val texCoordHandle = GLES20.glGetAttribLocation(program, "vTexCoord")
         GLES20.glEnableVertexAttribArray(texCoordHandle)
         GLES20.glVertexAttribPointer(texCoordHandle, 2, GLES20.GL_FLOAT, false, 0, textureBuffer)
 
-        // Set the sampler texture unit to 0
-        val samplerHandle = GLES20.glGetUniformLocation(program, "sTexture")
-        GLES20.glUniform1i(samplerHandle, 0)
-
-        // Draw the quad
         GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)
 
-        // Disable attribute arrays
         GLES20.glDisableVertexAttribArray(positionHandle)
         GLES20.glDisableVertexAttribArray(texCoordHandle)
-
-        // Unbind texture
         GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, 0)
-
-        // Swap buffers
-        EGL14.eglSwapBuffers(eglDisplay, eglSurface)
     }
 
     private fun loadShader(type: Int, shaderCode: String): Int {

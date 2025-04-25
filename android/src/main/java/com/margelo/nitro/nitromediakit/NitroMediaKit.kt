@@ -274,7 +274,7 @@ class NitroMediaKit : HybridNitroMediaKitSpec() {
                             lastVideoSampleTimeUs = sampleTimeUs
                         }
                         val trackDurationUs = lastVideoSampleTimeUs - firstVideoSampleTimeUs
-                        videoPresentationTimeUsOffset += trackDurationUs + 33333L // ~1/30s gap
+                        videoPresentationTimeUsOffset += trackDurationUs // No additional gap
                         extractor.unselectTrack(srcVideoTrackIndex)
                     }
 
@@ -297,7 +297,7 @@ class NitroMediaKit : HybridNitroMediaKitSpec() {
                             lastAudioSampleTimeUs = sampleTimeUs
                         }
                         val trackDurationUs = lastAudioSampleTimeUs - firstAudioSampleTimeUs
-                        audioPresentationTimeUsOffset += trackDurationUs + 33333L
+                        audioPresentationTimeUsOffset += trackDurationUs // No additional gap
                         extractor.unselectTrack(srcAudioTrackIndex)
                     }
                     extractor.release()
