@@ -23,6 +23,7 @@ export default function App() {
         'https://www.sample-videos.com/video321/mp4/720/big_buck_bunny_720p_2mb.mp4',
         'https://www.sample-videos.com/video321/mp4/720/big_buck_bunny_720p_2mb.mp4',
       ]);
+      Alert.alert('Merged Video Created', `Saved at: ${video}`);
       console.log('Merged video saved at:', video);
     } catch (error) {
       console.error('Error merging videos:', error);
@@ -36,6 +37,7 @@ export default function App() {
         'Sameer Ather',
         'bottom-right'
       );
+      Alert.alert('Watermarked Video Created', `Saved at: ${video}`);
       console.log('Watermarked video saved at:', video);
     } catch (error) {
       console.error('Error watermarking video:', error);
