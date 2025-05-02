@@ -7,10 +7,6 @@ import CoreVideo     // For CVPixelBuffer
 import CoreMedia     // For CMTime and CMTimeRange if needed
 
 class NitroMediaKit: HybridNitroMediaKitSpec {
-    public var memorySize: Int {
-        return getSizeOf(self)
-    }
-
     public func convertImageToVideo(image: String, duration: Double) -> Promise<String> {
         return Promise.async {
             // This runs on a separate thread and can use `await` syntax
@@ -236,146 +232,161 @@ class NitroMediaKit: HybridNitroMediaKitSpec {
     }
 }
 
-public func watermarkVideo(video: String, watermark: String, position: String) -> Promise<String> {
+  public func watermarkVideo(video: String, watermark: String, position: String) -> Promise<String> {
     return Promise.async {
-        // Get the local file path, downloading if necessary
-        let localVideoPath = try await self.getLocalFilePath(video)
-        let videoURL = URL(fileURLWithPath: localVideoPath)
-        
-        let asset = AVAsset(url: videoURL)
-        let duration = try await asset.load(.duration)
-        guard duration > .zero else {
-            throw NSError(domain: "HybridMediaKit", code: -1, userInfo: [NSLocalizedDescriptionKey: "Video duration is zero"])
-        }
-        
-        // Create a composition
-        let composition = AVMutableComposition()
-        guard let videoTrack = try await asset.loadTracks(withMediaType: .video).first else {
-            throw NSError(domain: "HybridMediaKit", code: -1, userInfo: [NSLocalizedDescriptionKey: "No video track found in asset"])
-        }
-        
-        let timeRange = CMTimeRange(start: .zero, duration: duration)
-        
-        guard let compositionVideoTrack = composition.addMutableTrack(
-            withMediaType: .video,
-            preferredTrackID: kCMPersistentTrackID_Invalid
-        ) else {
-            throw NSError(domain: "HybridMediaKit", code: -1, userInfo: [NSLocalizedDescriptionKey: "Cannot create video track in composition"])
-        }
-        
-        try compositionVideoTrack.insertTimeRange(timeRange, of: videoTrack, at: .zero)
-        
-        // Try to preserve the original transformation (rotation) of the video
-        compositionVideoTrack.preferredTransform = try await videoTrack.load(.preferredTransform)
-        
-        // Create a video composition
-        let videoComposition = AVMutableVideoComposition()
-        let naturalSize = try await videoTrack.load(.naturalSize)
-        videoComposition.renderSize = naturalSize
-        videoComposition.frameDuration = CMTime(value: 1, timescale: 30)
-        
-        // Instruction
-        let instruction = AVMutableVideoCompositionInstruction()
-        instruction.timeRange = timeRange
-        
-        let layerInstruction = AVMutableVideoCompositionLayerInstruction(assetTrack: compositionVideoTrack)
-        instruction.layerInstructions = [layerInstruction]
-        videoComposition.instructions = [instruction]
-        
-        // Create the watermark layer
-        let overlayLayer = CATextLayer()
-        overlayLayer.string = watermark
-        overlayLayer.font = UIFont.systemFont(ofSize: 64, weight: .bold)
-        overlayLayer.fontSize = 64
-        overlayLayer.alignmentMode = .left
-        overlayLayer.contentsScale = UIScreen.main.scale
-        overlayLayer.foregroundColor = UIColor.white.cgColor
-        
-        // Determine watermark position
-        // Padding from the edges
-        let padding: CGFloat = 50
-        let textSize = (watermark as NSString).size(withAttributes: [.font: UIFont.systemFont(ofSize: 64, weight: .bold)])
-        
-        var originX: CGFloat = 0
-        var originY: CGFloat = 0
-        
-        // Convert to lowercase for consistency
-        switch position.lowercased() {
+      // Get the local file path, downloading if necessary
+      let localVideoPath = try await self.getLocalFilePath(video)
+      let videoURL = URL(fileURLWithPath: localVideoPath)
+      
+      let asset = AVAsset(url: videoURL)
+      let duration = try await asset.load(.duration)
+      guard duration > .zero else {
+        throw NSError(domain: "HybridMediaKit", code: -1, userInfo: [NSLocalizedDescriptionKey: "Video duration is zero"])
+      }
+      
+      // Create a composition
+      let composition = AVMutableComposition()
+      guard let videoTrack = try await asset.loadTracks(withMediaType: .video).first else {
+        throw NSError(domain: "HybridMediaKit", code: -1, userInfo: [NSLocalizedDescriptionKey: "No video track found in asset"])
+      }
+      
+      let timeRange = CMTimeRange(start: .zero, duration: duration)
+      
+      guard let compositionVideoTrack = composition.addMutableTrack(
+        withMediaType: .video,
+        preferredTrackID: kCMPersistentTrackID_Invalid
+      ) else {
+        throw NSError(domain: "HybridMediaKit", code: -1, userInfo: [NSLocalizedDescriptionKey: "Cannot create video track in composition"])
+      }
+      
+      try compositionVideoTrack.insertTimeRange(timeRange, of: videoTrack, at: .zero)
+      
+      // Preserve the original transformation
+      let transform = try await videoTrack.load(.preferredTransform)
+      compositionVideoTrack.preferredTransform = transform
+      
+      // Create a video composition
+      let videoComposition = AVMutableVideoComposition()
+      let naturalSize = try await videoTrack.load(.naturalSize)
+      videoComposition.renderSize = naturalSize
+      videoComposition.frameDuration = CMTime(value: 1, timescale: 30)
+      
+      // Instruction
+      let instruction = AVMutableVideoCompositionInstruction()
+      instruction.timeRange = timeRange
+      
+      let layerInstruction = AVMutableVideoCompositionLayerInstruction(assetTrack: compositionVideoTrack)
+      instruction.layerInstructions = [layerInstruction]
+      videoComposition.instructions = [instruction]
+      
+      // Create the watermark layer
+      let overlayLayer = CATextLayer()
+      overlayLayer.string = watermark
+      overlayLayer.font = UIFont.systemFont(ofSize: 64, weight: .bold)
+      overlayLayer.fontSize = 64
+      overlayLayer.alignmentMode = .left
+      overlayLayer.contentsScale = await MainActor.run { UIScreen.main.scale }
+      overlayLayer.foregroundColor = UIColor.white.cgColor
+      
+      // Calculate text size
+      let textSize = (watermark as NSString).size(withAttributes: [.font: UIFont.systemFont(ofSize: 64, weight: .bold)])
+      
+      // Define padding
+      let padding: CGFloat = 50
+      
+      // Calculate displayed size based on the transform
+      let displayedSize: CGSize
+      if transform.a == 1 && transform.d == 1 { // 0 degrees
+        displayedSize = naturalSize
+      } else if transform.a == 0 && transform.b == -1 && transform.c == 1 && transform.d == 0 { // 90 degrees clockwise
+        displayedSize = CGSize(width: naturalSize.height, height: naturalSize.width)
+      } else if transform.a == -1 && transform.d == -1 { // 180 degrees
+        displayedSize = naturalSize
+      } else if transform.a == 0 && transform.b == 1 && transform.c == -1 && transform.d == 0 { // 270 degrees clockwise
+        displayedSize = CGSize(width: naturalSize.height, height: naturalSize.width)
+      } else {
+        displayedSize = naturalSize // Fallback
+      }
+      
+      // Calculate desired position in displayed coordinate system
+      let displayedPoint: CGPoint
+      switch position.lowercased() {
         case "top-left":
-            originX = padding
-            originY = naturalSize.height - textSize.height - padding
+          displayedPoint = CGPoint(x: padding, y: displayedSize.height - textSize.height - padding)
         case "top-right":
-            originX = naturalSize.width - textSize.width - padding
-            originY = naturalSize.height - textSize.height - padding
+          displayedPoint = CGPoint(x: displayedSize.width - textSize.width - padding, y: displayedSize.height - textSize.height - padding)
         case "bottom-right":
-            originX = naturalSize.width - textSize.width - padding
-            originY = padding
+          displayedPoint = CGPoint(x: displayedSize.width - textSize.width - padding, y: padding)
         case "bottom-left":
-            fallthrough
+          displayedPoint = CGPoint(x: padding, y: padding)
         default:
-            originX = padding
-            originY = padding
+          displayedPoint = CGPoint(x: padding, y: padding)
+      }
+      
+      // Map to natural coordinate system using inverse transform
+      let inverseTransform = transform.inverted()
+      let naturalPoint = displayedPoint.applying(inverseTransform)
+      
+      // Set the watermark layer’s frame
+      overlayLayer.frame = CGRect(x: naturalPoint.x, y: naturalPoint.y, width: textSize.width, height: textSize.height)
+      
+      // Create parent and video layers
+      let parentLayer = CALayer()
+      let videoLayer = CALayer()
+      
+      parentLayer.frame = CGRect(x: 0, y: 0, width: naturalSize.width, height: naturalSize.height)
+      videoLayer.frame = parentLayer.bounds
+      
+      parentLayer.addSublayer(videoLayer)
+      parentLayer.addSublayer(overlayLayer)
+      
+      // Set up the animation tool
+      videoComposition.animationTool = AVVideoCompositionCoreAnimationTool(
+        postProcessingAsVideoLayer: videoLayer,
+        in: parentLayer
+      )
+      
+      // Export the video
+      let documentsDirectory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
+      let outputURL = documentsDirectory.appendingPathComponent("watermarked_video_\(Int(Date().timeIntervalSince1970)).mp4")
+      
+      if FileManager.default.fileExists(atPath: outputURL.path) {
+        try FileManager.default.removeItem(at: outputURL)
+      }
+      
+      guard let exporter = AVAssetExportSession(asset: composition, presetName: AVAssetExportPresetHighestQuality) else {
+        throw NSError(domain: "HybridMediaKit", code: -1, userInfo: [NSLocalizedDescriptionKey: "Cannot create AVAssetExportSession"])
+      }
+      
+      exporter.videoComposition = videoComposition
+      exporter.outputURL = outputURL
+      exporter.outputFileType = .mp4
+      exporter.shouldOptimizeForNetworkUse = true
+      
+      try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+        exporter.exportAsynchronously {
+          switch exporter.status {
+            case .completed:
+              continuation.resume()
+            case .failed:
+              if let error = exporter.error {
+                continuation.resume(throwing: error)
+              } else {
+                let error = NSError(domain: "HybridMediaKit", code: -1, userInfo: [NSLocalizedDescriptionKey: "Unknown export error"])
+                continuation.resume(throwing: error)
+              }
+            case .cancelled:
+              let error = NSError(domain: "HybridMediaKit", code: -1, userInfo: [NSLocalizedDescriptionKey: "Export cancelled"])
+              continuation.resume(throwing: error)
+            default:
+              break
+          }
         }
-        
-        overlayLayer.frame = CGRect(x: originX, y: originY, width: textSize.width, height: textSize.height)
-        
-        // Create parent layer and video layer
-        let parentLayer = CALayer()
-        let videoLayer = CALayer()
-        
-        parentLayer.frame = CGRect(x: 0, y: 0, width: naturalSize.width, height: naturalSize.height)
-        videoLayer.frame = parentLayer.bounds
-        
-        parentLayer.addSublayer(videoLayer)
-        parentLayer.addSublayer(overlayLayer)
-        
-        // Set up the animation tool
-        videoComposition.animationTool = AVVideoCompositionCoreAnimationTool(
-            postProcessingAsVideoLayer: videoLayer,
-            in: parentLayer
-        )
-        
-        // Export the video
-        let documentsDirectory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
-        let outputURL = documentsDirectory.appendingPathComponent("watermarked_video_\(Int(Date().timeIntervalSince1970)).mp4")
-        
-        if FileManager.default.fileExists(atPath: outputURL.path) {
-            try FileManager.default.removeItem(at: outputURL)
-        }
-        
-        guard let exporter = AVAssetExportSession(asset: composition, presetName: AVAssetExportPresetHighestQuality) else {
-            throw NSError(domain: "HybridMediaKit", code: -1, userInfo: [NSLocalizedDescriptionKey: "Cannot create AVAssetExportSession"])
-        }
-        
-        exporter.videoComposition = videoComposition
-        exporter.outputURL = outputURL
-        exporter.outputFileType = .mp4
-        exporter.shouldOptimizeForNetworkUse = true
-        
-        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-            exporter.exportAsynchronously {
-                switch exporter.status {
-                case .completed:
-                    continuation.resume()
-                case .failed:
-                    if let error = exporter.error {
-                        continuation.resume(throwing: error)
-                    } else {
-                        let error = NSError(domain: "HybridMediaKit", code: -1, userInfo: [NSLocalizedDescriptionKey: "Unknown export error"])
-                        continuation.resume(throwing: error)
-                    }
-                case .cancelled:
-                    let error = NSError(domain: "HybridMediaKit", code: -1, userInfo: [NSLocalizedDescriptionKey: "Export cancelled"])
-                    continuation.resume(throwing: error)
-                default:
-                    break
-                }
-            }
-        }
-        
-        return outputURL.path
+      }
+      
+      return outputURL.path
     }
-}
+  }
 
 
 
