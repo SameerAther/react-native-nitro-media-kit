@@ -58,28 +58,26 @@ class EglHelper {
         precision mediump float;
         varying vec2 outTexCoord;
         uniform samplerExternalOES sVideoTexture;
-        uniform sampler2D sOverlayTexture;
+        uniform sampler2D        sOverlayTexture;
         uniform bool uUseVideoTexture;
         uniform bool uUseOverlay;
-        uniform vec2 uOverlayPosition;
-        uniform vec2 uOverlaySize;
+        uniform vec2 uOverlayPosition;   // bottom-left corner in tex-coords
+        uniform vec2 uOverlaySize;       // (width,height) in tex-coords
         void main() {
-            vec4 color;
-            if (uUseVideoTexture) {
-                color = texture2D(sVideoTexture, outTexCoord);
-            } else {
-                color = texture2D(sOverlayTexture, outTexCoord);
+            vec4 base = uUseVideoTexture
+                    ? texture2D(sVideoTexture, outTexCoord)
+                    : texture2D(sOverlayTexture, outTexCoord);
+            if (!uUseOverlay) {
+                gl_FragColor = base;
+                return;
             }
-            if (uUseOverlay) {
-                vec2 overlayCoord = (outTexCoord - uOverlayPosition) / uOverlaySize;
-                overlayCoord = clamp(overlayCoord, vec2(0.0), vec2(1.0));
-                vec4 overlayColor = texture2D(sOverlayTexture, overlayCoord);
-                float inOverlay = step(0.0, overlayCoord.x) * step(0.0, overlayCoord.y) *
-                                step(overlayCoord.x, 1.0) * step(overlayCoord.y, 1.0);
-                overlayColor.a *= inOverlay;
-                color = mix(color, overlayColor, overlayColor.a);
-            }
-            gl_FragColor = color;
+            vec2 rel = (outTexCoord - uOverlayPosition) / uOverlaySize;
+            float inOverlay = step(0.0, rel.x) * step(0.0, rel.y) *
+                            step(rel.x, 1.0) * step(rel.y, 1.0);
+            rel = clamp(rel, 0.0, 1.0);
+            vec4 overlay = texture2D(sOverlayTexture, rel);
+            overlay.a *= inOverlay;
+            gl_FragColor = mix(base, overlay, overlay.a);
         }
     """.trimIndent()
 
@@ -260,7 +258,7 @@ class EglHelper {
 
         GLES20.glUniform1i(useVideoTextureHandle, 1) // Use video texture
         GLES20.glUniform1i(useOverlayHandle, 0)      // Disable overlay
-        GLES20.glUniformMatrix4fv(stMatrixHandle, 1, false, stMatrix, 0)
+        GLES20.glUniformMatrix4fv(stMatrixHandle, 1, false, fixOrientation(stMatrix), 0)
 
         val positionHandle = GLES20.glGetAttribLocation(program, "vPosition")
         GLES20.glEnableVertexAttribArray(positionHandle)
@@ -302,7 +300,7 @@ class EglHelper {
 
         GLES20.glUniform1i(useVideoTextureHandle, 1) // Use video texture
         GLES20.glUniform1i(useOverlayHandle, 1)     // Enable overlay
-        GLES20.glUniformMatrix4fv(stMatrixHandle, 1, false, stMatrix, 0)
+        GLES20.glUniformMatrix4fv(stMatrixHandle, 1, false, fixOrientation(stMatrix), 0)
 
         val positionHandle = GLES20.glGetAttribLocation(program, "vPosition")
         GLES20.glEnableVertexAttribArray(positionHandle)
@@ -324,12 +322,15 @@ class EglHelper {
 
         val normalizedPosY = (videoHeight - posY - overlayBitmapHeight) / videoHeight.toFloat()
         val overlayPositionHandle = GLES20.glGetUniformLocation(program, "uOverlayPosition")
-        GLES20.glUniform2f(overlayPositionHandle, posX / videoWidth.toFloat(), normalizedPosY)
+        val overlayPosX = posX / videoWidth.toFloat()
+        val overlayPosY = 1f - (posY + overlayBitmapHeight).toFloat() / videoHeight
+        GLES20.glUniform2f(overlayPositionHandle, overlayPosX, overlayPosY)
 
         val overlaySizeHandle = GLES20.glGetUniformLocation(program, "uOverlaySize")
         GLES20.glUniform2f(overlaySizeHandle, overlayBitmapWidth.toFloat() / videoWidth, overlayBitmapHeight.toFloat() / videoHeight)
 
         GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)
+        GLES20.glFinish();
 
         GLES20.glDisableVertexAttribArray(positionHandle)
         GLES20.glDisableVertexAttribArray(texCoordHandle)
@@ -347,7 +348,7 @@ class EglHelper {
         GLES20.glUniform1i(useOverlayHandle, 0)     // Disable overlay
         // Set identity matrix since no transformation is needed for static images
         val identityMatrix = FloatArray(16).apply { Matrix.setIdentityM(this, 0) }
-        GLES20.glUniformMatrix4fv(stMatrixHandle, 1, false, identityMatrix, 0)
+        GLES20.glUniformMatrix4fv(stMatrixHandle, 1, false, fixOrientation(identityMatrix), 0)
 
         GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
         GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, textureId)
@@ -395,6 +396,16 @@ class EglHelper {
 
     fun swapBuffers() {
         EGL14.eglSwapBuffers(eglDisplay, eglSurface)
+    }
+
+    private fun fixOrientation(st: FloatArray): FloatArray {
+        val flip = FloatArray(16)
+        Matrix.setIdentityM(flip, 0)
+        Matrix.scaleM(flip, 0, 1f, -1f, 1f)   // flip Y
+        Matrix.translateM(flip, 0, 0f, -1f, 0f)
+        val out = FloatArray(16)
+        Matrix.multiplyMM(out, 0, flip, 0, st, 0)
+        return out
     }
 
     fun release() {

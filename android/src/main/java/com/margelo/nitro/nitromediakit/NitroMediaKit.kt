@@ -713,37 +713,42 @@ class NitroMediaKit : HybridNitroMediaKitSpec() {
     data class VideoProperties(val width: Int, val height: Int, val frameRate: Float)
 
     private fun calculateWatermarkPosition(
-        position: String,
-        watermarkBitmap: Bitmap,
-        videoWidth: Int,
-        videoHeight: Int
-    ): Pair<Float, Float> {
-        val posX: Float
-        val posY: Float
-        when (position.toLowerCase()) {
-            "top-left" -> {
-                posX = 0f
-                posY = videoHeight - watermarkBitmap.height.toFloat()
-            }
-            "top-right" -> {
-                posX = videoWidth - watermarkBitmap.width.toFloat()
-                posY = videoHeight - watermarkBitmap.height.toFloat()
-            }
-            "bottom-left" -> {
-                posX = 0f
-                posY = 0f
-            }
-            "bottom-right" -> {
-                posX = videoWidth - watermarkBitmap.width.toFloat()
-                posY = 0f
-            }
-            else -> {
-                posX = 0f
-                posY = 0f
-            }
+    position: String,
+    watermarkBitmap: Bitmap,
+    videoWidth: Int,
+    videoHeight: Int
+): Pair<Float, Float> {
+
+    var posX = 0f   // give them a default so they’re always initialised
+    var posY = 0f
+
+    when (position.lowercase()) {
+        "top-left" -> {
+            posX = 0f
+            posY = (videoHeight - watermarkBitmap.height).toFloat()
         }
-        return Pair(posX, posY)
+        "top-right" -> {
+            posX = (videoWidth  - watermarkBitmap.width ).toFloat()
+            posY = (videoHeight - watermarkBitmap.height).toFloat()
+        }
+        "bottom-left" -> {
+            posX = 0f
+            posY = 0f
+        }
+        "bottom-right" -> {
+            posX = (videoWidth  - watermarkBitmap.width ).toFloat()
+            posY = 0f
+        }
+        else -> {
+            // centre by default
+            posX = ((videoWidth  - watermarkBitmap.width )  / 2f)
+            posY = ((videoHeight - watermarkBitmap.height) / 2f)
+        }
     }
+
+    return Pair(posX, posY)
+}
+
 
     private fun adjustBitmapToSupportedSize(
     bitmap: Bitmap,
