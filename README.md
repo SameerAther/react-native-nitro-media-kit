@@ -29,7 +29,7 @@ cd ios && pod install
 <details>
 <summary>Android requirements</summary>
 
-- **minSdkVersion 23+**
+- **minSdkVersion 24+**
   (`android/app/build.gradle`)
 - The library already declares `compileSdk`/`targetSdk` via NitroModules’ BOM; no extra setup.
 
