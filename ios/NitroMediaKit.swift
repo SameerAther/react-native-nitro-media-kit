@@ -1,5 +1,5 @@
 import Foundation
-import AVFoundation
+@preconcurrency import AVFoundation
 import UIKit
 import NitroModules // Import Promise from NitroModules core
 import QuartzCore    // For CATextLayer
@@ -129,7 +129,7 @@ class NitroMediaKit: HybridNitroMediaKitSpec {
             
             do {
                 // Load asset properties
-                let tracks = try await asset.load(.tracks)
+                _ = try await asset.load(.tracks)
                 let duration = try await asset.load(.duration)
                 
                 if duration == .zero {
