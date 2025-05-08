@@ -340,15 +340,16 @@ class EglHelper {
         return timestamp
     }
 
-    fun drawFrame(bitmap: Bitmap) {
+    fun drawFrame(bitmap: Bitmap, flipY: Boolean = false) {
         GLES20.glUseProgram(program)
         GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
 
         GLES20.glUniform1i(useVideoTextureHandle, 0) // Use overlay texture for image
         GLES20.glUniform1i(useOverlayHandle, 0)     // Disable overlay
         // Set identity matrix since no transformation is needed for static images
-        val identityMatrix = FloatArray(16).apply { Matrix.setIdentityM(this, 0) }
-        GLES20.glUniformMatrix4fv(stMatrixHandle, 1, false, fixOrientation(identityMatrix), 0)
+        val m = FloatArray(16).apply { Matrix.setIdentityM(this, 0) }
+    val finalMatrix = if (flipY) fixOrientation(m) else m
+    GLES20.glUniformMatrix4fv(stMatrixHandle, 1, false, finalMatrix, 0)
 
         GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
         GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, textureId)
