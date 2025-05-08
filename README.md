@@ -2,6 +2,9 @@
 
 > High-performance image-and-video processing for **React Native** powered by [Nitro Modules](https://nitro.margelo.com/).
 
+> **⚠️ Status: Experimental — not production-ready yet**  
+> The API surface may change without notice, and certain edge-cases (see “Known issues” below) are still being debugged.
+
 ---
 
 ## ✨ Features
@@ -113,6 +116,14 @@ Adds a **text** watermark to any corner (or centre).
 | **`IllegalArgumentException: No video track found…`** | Ensure the input is an **MP4** (H.264). Other containers aren’t supported yet.                                  |
 | **Black video on Android**                            | Your device’s hardware codec may dislike the resolution. Set _both_ dimensions to even numbers (e.g. 1280×720). |
 | iOS export **stuck at 0 %**                           | Check free disk space – AVFoundation silently fails when temp space is low.                                     |
+
+---
+
+## 🐞 Known issues
+
+| Issue                                      | Details                                                                                                                                      |
+| ------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Occasional flicker in the output video** | On certain GPU/driver and device combinations you may see a brief black frame or brightness flash in the output video. A fix is in progress. |
 
 ---
 
