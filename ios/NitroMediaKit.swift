@@ -2,9 +2,6 @@ import Foundation
 @preconcurrency import AVFoundation
 import UIKit
 import NitroModules // Import Promise from NitroModules core
-import QuartzCore    // For CATextLayer
-import CoreVideo     // For CVPixelBuffer
-import CoreMedia     // For CMTime and CMTimeRange if needed
 
 class NitroMediaKit: HybridNitroMediaKitSpec {
     public func convertImageToVideo(image: String, duration: Double) -> Promise<String> {
