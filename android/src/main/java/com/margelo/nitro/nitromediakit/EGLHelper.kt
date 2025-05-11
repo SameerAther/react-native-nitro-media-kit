@@ -350,7 +350,7 @@ class EglHelper {
         GLES20.glUniform2f(overlaySizeHandle, overlayBitmapWidth.toFloat() / videoWidth, overlayBitmapHeight.toFloat() / videoHeight)
 
         GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)
-        GLES20.glFinish();
+        GLES20.glFlush();
 
         GLES20.glDisableVertexAttribArray(positionHandle)
         GLES20.glDisableVertexAttribArray(texCoordHandle)
@@ -387,7 +387,7 @@ class EglHelper {
         GLES20.glVertexAttribPointer(texCoordHandle, 2, GLES20.GL_FLOAT, false, 0, textureBuffer)
 
         GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)
-        GLES20.glFinish()
+        GLES20.glFlush()
         GLES20.glDisableVertexAttribArray(positionHandle)
         GLES20.glDisableVertexAttribArray(texCoordHandle)
         GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, 0)
@@ -417,7 +417,7 @@ class EglHelper {
     }
 
     fun swapBuffers() {
-        GLES20.glFinish()
+        GLES20.glFlush()
         EGL14.eglSwapBuffers(eglDisplay, eglSurface)
     }
 
@@ -429,6 +429,7 @@ class EglHelper {
 
     private inline fun ensureViewport() {
         GLES20.glViewport(0, 0, vpWidth, vpHeight)
+        GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
     }
 
     private fun fixOrientation(st: FloatArray): FloatArray {
