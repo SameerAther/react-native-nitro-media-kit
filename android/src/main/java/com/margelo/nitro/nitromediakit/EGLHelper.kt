@@ -35,6 +35,8 @@ class EglHelper {
     private var textureBuffer: FloatBuffer? = null
     private var overlayBitmapWidth = 0
     private var overlayBitmapHeight = 0
+    private var vpWidth  = 0
+    private var vpHeight = 0
     private var useOverlayHandle = 0
 
     private val vertexShaderCode = """
@@ -71,6 +73,10 @@ class EglHelper {
                 gl_FragColor = base;
                 return;
             }
+            if (!uUseOverlay || uOverlaySize.x == 0.0 || uOverlaySize.y == 0.0) {
+                gl_FragColor = base;
+                return;
+            }
             vec2 rel = (outTexCoord - uOverlayPosition) / uOverlaySize;
             float inOverlay = step(0.0, rel.x) * step(0.0, rel.y) *
                             step(rel.x, 1.0) * step(rel.y, 1.0);
@@ -81,7 +87,7 @@ class EglHelper {
         }
     """.trimIndent()
 
-    fun createEglContext(surface: Surface) {
+    fun createEglContext(surface: Surface,videoWidth: Int = 0, videoHeight: Int = 0) {
         this.surface = surface
 
         eglDisplay = EGL14.eglGetDisplay(EGL14.EGL_DEFAULT_DISPLAY)
@@ -93,6 +99,7 @@ class EglHelper {
             EGL14.EGL_GREEN_SIZE, 8,
             EGL14.EGL_BLUE_SIZE, 8,
             EGL14.EGL_ALPHA_SIZE, 8,
+            EGLExt.EGL_RECORDABLE_ANDROID, 1,
             EGL14.EGL_RENDERABLE_TYPE, EGL14.EGL_OPENGL_ES2_BIT,
             EGL14.EGL_NONE
         )
@@ -112,8 +119,19 @@ class EglHelper {
         eglSurface = EGL14.eglCreateWindowSurface(eglDisplay, eglConfig, surface, surfaceAttribs, 0)
 
         EGL14.eglMakeCurrent(eglDisplay, eglSurface, eglSurface, eglContext)
-
+        vpWidth  = if (videoWidth  > 0) videoWidth  else querySurface(EGL14.EGL_WIDTH)
+        vpHeight = if (videoHeight > 0) videoHeight else querySurface(EGL14.EGL_HEIGHT)
+        GLES20.glViewport(0, 0, vpWidth, vpHeight)
+        EGL14.eglSurfaceAttrib(
+            eglDisplay,
+            eglSurface,
+            EGL14.EGL_SWAP_BEHAVIOR,
+            EGL14.EGL_BUFFER_PRESERVED
+        )
         initGL()
+        if (videoWidth > 0 && videoHeight > 0) {
+            videoSurfaceTexture?.setDefaultBufferSize(videoWidth, videoHeight)
+        }
     }
 
     fun createTextBitmap(text: String, textSize: Float, textColor: Int): Bitmap {
@@ -241,6 +259,7 @@ class EglHelper {
     }
 
     fun drawVideoFrame(): Long {
+        ensureViewport()  
         synchronized(frameSyncObject) {
             while (!frameAvailable) {
                 frameSyncObject.wait(1000)
@@ -283,6 +302,7 @@ class EglHelper {
     }
 
     fun drawFrameWithOverlay(posX: Float, posY: Float, videoWidth: Int, videoHeight: Int): Long {
+        ensureViewport()  
         synchronized(frameSyncObject) {
             while (!frameAvailable) {
                 frameSyncObject.wait(1000)
@@ -341,6 +361,7 @@ class EglHelper {
     }
 
     fun drawFrame(bitmap: Bitmap, flipY: Boolean = false) {
+        ensureViewport()  
         GLES20.glUseProgram(program)
         GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
 
@@ -348,8 +369,8 @@ class EglHelper {
         GLES20.glUniform1i(useOverlayHandle, 0)     // Disable overlay
         // Set identity matrix since no transformation is needed for static images
         val m = FloatArray(16).apply { Matrix.setIdentityM(this, 0) }
-    val finalMatrix = if (flipY) fixOrientation(m) else m
-    GLES20.glUniformMatrix4fv(stMatrixHandle, 1, false, finalMatrix, 0)
+        val finalMatrix = if (flipY) fixOrientation(m) else m
+        GLES20.glUniformMatrix4fv(stMatrixHandle, 1, false, finalMatrix, 0)
 
         GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
         GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, textureId)
@@ -366,7 +387,7 @@ class EglHelper {
         GLES20.glVertexAttribPointer(texCoordHandle, 2, GLES20.GL_FLOAT, false, 0, textureBuffer)
 
         GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)
-
+        GLES20.glFinish()
         GLES20.glDisableVertexAttribArray(positionHandle)
         GLES20.glDisableVertexAttribArray(texCoordHandle)
         GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, 0)
@@ -396,7 +417,18 @@ class EglHelper {
     }
 
     fun swapBuffers() {
+        GLES20.glFinish()
         EGL14.eglSwapBuffers(eglDisplay, eglSurface)
+    }
+
+    private fun querySurface(what: Int): Int {
+        val tmp = IntArray(1)
+        EGL14.eglQuerySurface(eglDisplay, eglSurface, what, tmp, 0)
+        return tmp[0]
+    }
+
+    private inline fun ensureViewport() {
+        GLES20.glViewport(0, 0, vpWidth, vpHeight)
     }
 
     private fun fixOrientation(st: FloatArray): FloatArray {
