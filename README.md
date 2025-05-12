@@ -109,16 +109,6 @@ Adds a **text** watermark to any corner (or centre).
 | `position`  | string            | One of `'top-left'`, `'top-right'`, `'bottom-left'`, or `'center'`. |
 | **Returns** | `Promise<string>` | Path to the water-marked file.                                      |
 
-## ⚠️ Troubleshooting
-
-| Symptom                                               | Fix                                                                                                             |
-| ----------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
-| **`IllegalArgumentException: No video track found…`** | Ensure the input is an **MP4** (H.264). Other containers aren’t supported yet.                                  |
-| **Black video on Android**                            | Your device’s hardware codec may dislike the resolution. Set _both_ dimensions to even numbers (e.g. 1280×720). |
-| iOS export **stuck at 0 %**                           | Check free disk space – AVFoundation silently fails when temp space is low.                                     |
-
----
-
 ## 🐞 Known issues
 
 | Issue                                      | Details                                                                                                                                      |
