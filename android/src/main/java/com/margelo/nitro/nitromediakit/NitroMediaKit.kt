@@ -49,6 +49,13 @@ class NitroMediaKit : HybridNitroMediaKitSpec() {
         }
     }
 
+    private class PtsTracker {
+        var prev = -1L
+        var last = -1L
+        fun record(pts: Long) { prev = last; last = pts }
+        fun estimatedLastSampleDuration() = if (prev >= 0) last - prev else 0L
+    }
+
     // Helper method to check if a string is a remote URL
     private fun isRemoteUrl(path: String): Boolean {
         return path.startsWith("http://") || path.startsWith("https://")
@@ -74,7 +81,6 @@ class NitroMediaKit : HybridNitroMediaKitSpec() {
 
                 // Adjust bitmap to supported size
                 val adjustedBitmap = adjustBitmapToSupportedSize(bitmap, videoCapabilities)
-
                 Log.d("HybridMediaKit", "Adjusted bitmap dimensions: ${adjustedBitmap.width}x${adjustedBitmap.height}")
 
                 val width = adjustedBitmap.width
@@ -104,16 +110,15 @@ class NitroMediaKit : HybridNitroMediaKitSpec() {
 
                 eglHelper = EglHelper()
                 eglHelper.createEglContext(inputSurface)
-
+                eglHelper.loadStaticBitmapTexture(adjustedBitmap) 
                 val totalFrames = (duration * frameRate).toInt()
                 var videoTrackIndex = -1
                 val bufferInfo = MediaCodec.BufferInfo()
 
                 for (frameIndex in 0 until totalFrames) {
-                    val presentationTimeUs = (frameIndex * 1_000_000L) / frameRate
-
-                    eglHelper.drawFrame(adjustedBitmap)
-                    eglHelper.setPresentationTime(presentationTimeUs * 1000) // In nanoseconds
+                    val ptsUs = (frameIndex * 1_000_000L) / frameRate
+                    eglHelper.drawStaticFrame()
+                    eglHelper.setPresentationTime(ptsUs * 1000)      // ns
                     eglHelper.swapBuffers()
 
                     // Drain encoder output
@@ -241,68 +246,78 @@ class NitroMediaKit : HybridNitroMediaKitSpec() {
                 if (audioFormat != null) outputAudioTrackIndex = muxer.addTrack(audioFormat)
                 muxer.start()
 
-                // Step 5: Merge videos
+               // --- Step 5 ---------------------------------------------------------------
                 for (videoPath in videosToMerge) {
-                    val extractor = MediaExtractor()
-                    extractor.setDataSource(videoPath)
+                    val extractor = MediaExtractor().apply { setDataSource(videoPath) }
 
-                    var srcVideoTrackIndex = -1
-                    var srcAudioTrackIndex = -1
+                    var srcVideoTrack = -1
+                    var srcAudioTrack = -1
                     for (i in 0 until extractor.trackCount) {
-                        val format = extractor.getTrackFormat(i)
-                        val mime = format.getString(MediaFormat.KEY_MIME) ?: ""
-                        if (mime.startsWith("video/") && srcVideoTrackIndex == -1) srcVideoTrackIndex = i
-                        else if (mime.startsWith("audio/") && srcAudioTrackIndex == -1) srcAudioTrackIndex = i
+                        val mime = extractor.getTrackFormat(i).getString(MediaFormat.KEY_MIME) ?: ""
+                        if (mime.startsWith("video/") && srcVideoTrack == -1) srcVideoTrack = i
+                        else if (mime.startsWith("audio/") && srcAudioTrack == -1) srcAudioTrack = i
                     }
 
-                    // Video track
-                    if (srcVideoTrackIndex != -1 && outputVideoTrackIndex != -1) {
-                        extractor.selectTrack(srcVideoTrackIndex)
-                        val buffer = ByteBuffer.allocate(1024 * 1024)
-                        val bufferInfo = MediaCodec.BufferInfo()
-                        var firstVideoSampleTimeUs = -1L
-                        var lastVideoSampleTimeUs = 0L
+                    /* ---------- VIDEO ------------- */
+                    if (srcVideoTrack != -1 && outputVideoTrackIndex != -1) {
+                        val vPts = PtsTracker()
+                        extractor.selectTrack(srcVideoTrack)
+
+                        val buffer     = ByteBuffer.allocate(1_048_576)
+                        val info       = MediaCodec.BufferInfo()
+                        var firstPtsUs = -1L
+
                         while (true) {
-                            bufferInfo.size = extractor.readSampleData(buffer, 0)
-                            if (bufferInfo.size < 0) break
-                            val sampleTimeUs = extractor.sampleTime
-                            if (firstVideoSampleTimeUs == -1L) firstVideoSampleTimeUs = sampleTimeUs
-                            bufferInfo.presentationTimeUs = sampleTimeUs - firstVideoSampleTimeUs + videoPresentationTimeUsOffset
-                            bufferInfo.flags = extractor.sampleFlags
-                            muxer.writeSampleData(outputVideoTrackIndex, buffer, bufferInfo)
+                            info.size = extractor.readSampleData(buffer, 0)
+                            if (info.size < 0) break
+
+                            val samplePts = extractor.sampleTime
+                            if (firstPtsUs == -1L) firstPtsUs = samplePts
+                            vPts.record(samplePts)
+
+                            info.presentationTimeUs = samplePts - firstPtsUs + videoPresentationTimeUsOffset
+                            info.flags              = extractor.sampleFlags
+                            muxer.writeSampleData(outputVideoTrackIndex, buffer, info)
                             extractor.advance()
-                            lastVideoSampleTimeUs = sampleTimeUs
                         }
-                        val trackDurationUs = lastVideoSampleTimeUs - firstVideoSampleTimeUs
-                        videoPresentationTimeUsOffset += trackDurationUs // No additional gap
-                        extractor.unselectTrack(srcVideoTrackIndex)
+
+                        val clipDurUs = (vPts.last - firstPtsUs) + vPts.estimatedLastSampleDuration()
+                        videoPresentationTimeUsOffset += clipDurUs
+
+                        extractor.unselectTrack(srcVideoTrack)
                     }
 
-                    // Audio track
-                    if (srcAudioTrackIndex != -1 && outputAudioTrackIndex != -1) {
-                        extractor.selectTrack(srcAudioTrackIndex)
-                        val buffer = ByteBuffer.allocate(1024 * 1024)
-                        val bufferInfo = MediaCodec.BufferInfo()
-                        var firstAudioSampleTimeUs = -1L
-                        var lastAudioSampleTimeUs = 0L
+                    /* ---------- AUDIO ------------- */
+                    if (srcAudioTrack != -1 && outputAudioTrackIndex != -1) {
+                        val aPts = PtsTracker()
+                        extractor.selectTrack(srcAudioTrack)
+
+                        val buffer     = ByteBuffer.allocate(1_048_576)
+                        val info       = MediaCodec.BufferInfo()
+                        var firstPtsUs = -1L
+
                         while (true) {
-                            bufferInfo.size = extractor.readSampleData(buffer, 0)
-                            if (bufferInfo.size < 0) break
-                            val sampleTimeUs = extractor.sampleTime
-                            if (firstAudioSampleTimeUs == -1L) firstAudioSampleTimeUs = sampleTimeUs
-                            bufferInfo.presentationTimeUs = sampleTimeUs - firstAudioSampleTimeUs + audioPresentationTimeUsOffset
-                            bufferInfo.flags = extractor.sampleFlags
-                            muxer.writeSampleData(outputAudioTrackIndex, buffer, bufferInfo)
+                            info.size = extractor.readSampleData(buffer, 0)
+                            if (info.size < 0) break
+
+                            val samplePts = extractor.sampleTime
+                            if (firstPtsUs == -1L) firstPtsUs = samplePts
+                            aPts.record(samplePts)
+
+                            info.presentationTimeUs = samplePts - firstPtsUs + audioPresentationTimeUsOffset
+                            info.flags              = extractor.sampleFlags
+                            muxer.writeSampleData(outputAudioTrackIndex, buffer, info)
                             extractor.advance()
-                            lastAudioSampleTimeUs = sampleTimeUs
                         }
-                        val trackDurationUs = lastAudioSampleTimeUs - firstAudioSampleTimeUs
-                        audioPresentationTimeUsOffset += trackDurationUs // No additional gap
-                        extractor.unselectTrack(srcAudioTrackIndex)
+
+                        val clipDurUs = (aPts.last - firstPtsUs) + aPts.estimatedLastSampleDuration()
+                        audioPresentationTimeUsOffset += clipDurUs
+
+                        extractor.unselectTrack(srcAudioTrack)
                     }
+
                     extractor.release()
                 }
-
                 muxer.stop()
                 muxer.release()
                 muxer = null

@@ -1,5 +1,5 @@
 package com.margelo.nitro.nitromediakit
-
+import android.opengl.Matrix
 import android.opengl.*
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -123,15 +123,20 @@ class EglHelper {
         vpHeight = if (videoHeight > 0) videoHeight else querySurface(EGL14.EGL_HEIGHT)
         GLES20.glViewport(0, 0, vpWidth, vpHeight)
         EGL14.eglSurfaceAttrib(
-            eglDisplay,
-            eglSurface,
+            eglDisplay, eglSurface,
             EGL14.EGL_SWAP_BEHAVIOR,
-            EGL14.EGL_BUFFER_PRESERVED
+            EGL14.EGL_BUFFER_DESTROYED   // API-24+
         )
         initGL()
         if (videoWidth > 0 && videoHeight > 0) {
             videoSurfaceTexture?.setDefaultBufferSize(videoWidth, videoHeight)
         }
+    }
+
+    fun loadStaticBitmapTexture(bitmap: Bitmap) {
+        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, textureId)
+        GLUtils.texImage2D(GLES20.GL_TEXTURE_2D, 0, bitmap, 0)
+        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, 0)
     }
 
     fun createTextBitmap(text: String, textSize: Float, textColor: Int): Bitmap {
@@ -303,6 +308,7 @@ class EglHelper {
 
     fun drawFrameWithOverlay(posX: Float, posY: Float, videoWidth: Int, videoHeight: Int): Long {
         ensureViewport()  
+        GLES20.glEnable(GLES20.GL_BLEND)
         synchronized(frameSyncObject) {
             while (!frameAvailable) {
                 frameSyncObject.wait(1000)
@@ -350,6 +356,7 @@ class EglHelper {
         GLES20.glUniform2f(overlaySizeHandle, overlayBitmapWidth.toFloat() / videoWidth, overlayBitmapHeight.toFloat() / videoHeight)
 
         GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)
+        GLES20.glDisable(GLES20.GL_BLEND)
         GLES20.glFlush();
 
         GLES20.glDisableVertexAttribArray(positionHandle)
@@ -360,36 +367,37 @@ class EglHelper {
         return timestamp
     }
 
-    fun drawFrame(bitmap: Bitmap, flipY: Boolean = false) {
-        ensureViewport()  
+    fun drawStaticFrame(flipY: Boolean = false) {
+        ensureViewport()
+
         GLES20.glUseProgram(program)
         GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
+        GLES20.glDisable(GLES20.GL_BLEND)
+        GLES20.glUniform1i(useVideoTextureHandle, 0) // sampling 2-D texture
+        GLES20.glUniform1i(useOverlayHandle,  0)     // no extra overlay
 
-        GLES20.glUniform1i(useVideoTextureHandle, 0) // Use overlay texture for image
-        GLES20.glUniform1i(useOverlayHandle, 0)     // Disable overlay
-        // Set identity matrix since no transformation is needed for static images
         val m = FloatArray(16).apply { Matrix.setIdentityM(this, 0) }
         val finalMatrix = if (flipY) fixOrientation(m) else m
         GLES20.glUniformMatrix4fv(stMatrixHandle, 1, false, finalMatrix, 0)
 
         GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
         GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, textureId)
-        GLUtils.texImage2D(GLES20.GL_TEXTURE_2D, 0, bitmap, 0)
-        val overlayTextureHandle = GLES20.glGetUniformLocation(program, "sOverlayTexture")
-        GLES20.glUniform1i(overlayTextureHandle, 0)
+        GLES20.glUniform1i(
+            GLES20.glGetUniformLocation(program, "sOverlayTexture"),
+            0
+        )
 
-        val positionHandle = GLES20.glGetAttribLocation(program, "vPosition")
-        GLES20.glEnableVertexAttribArray(positionHandle)
-        GLES20.glVertexAttribPointer(positionHandle, 2, GLES20.GL_FLOAT, false, 0, vertexBuffer)
-
-        val texCoordHandle = GLES20.glGetAttribLocation(program, "vTexCoord")
-        GLES20.glEnableVertexAttribArray(texCoordHandle)
-        GLES20.glVertexAttribPointer(texCoordHandle, 2, GLES20.GL_FLOAT, false, 0, textureBuffer)
+        val posLoc = GLES20.glGetAttribLocation(program, "vPosition")
+        val uvLoc  = GLES20.glGetAttribLocation(program, "vTexCoord")
+        GLES20.glEnableVertexAttribArray(posLoc)
+        GLES20.glEnableVertexAttribArray(uvLoc)
+        GLES20.glVertexAttribPointer(posLoc, 2, GLES20.GL_FLOAT, false, 0, vertexBuffer)
+        GLES20.glVertexAttribPointer(uvLoc, 2, GLES20.GL_FLOAT, false, 0, textureBuffer)
 
         GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)
         GLES20.glFlush()
-        GLES20.glDisableVertexAttribArray(positionHandle)
-        GLES20.glDisableVertexAttribArray(texCoordHandle)
+        GLES20.glDisableVertexAttribArray(posLoc)
+        GLES20.glDisableVertexAttribArray(uvLoc)
         GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, 0)
     }
 
