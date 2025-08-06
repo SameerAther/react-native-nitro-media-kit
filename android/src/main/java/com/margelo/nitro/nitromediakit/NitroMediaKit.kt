@@ -144,10 +144,6 @@ class NitroMediaKit : HybridNitroMediaKitSpec() {
                         }
                     }
                 }
-
-                // Signal end of stream
-                eglHelper.setPresentationTime(totalFrames * 1_000_000L / frameRate * 1000)
-                eglHelper.swapBuffers()
                 encoder.signalEndOfInputStream()
 
                 // Drain any remaining output
@@ -464,12 +460,8 @@ class NitroMediaKit : HybridNitroMediaKitSpec() {
                             // Release the output buffer first
                             decoder.releaseOutputBuffer(outputBufferIndex, doRender)
                             if (doRender) {
-                                // Draw the frame after it's available
-                                val timestamp = eglHelper.drawFrameWithOverlay(
-                                    posX = posX,
-                                    posY = posY,
-                                    videoWidth = width,
-                                    videoHeight = height
+                                 val timestamp = eglHelper.drawFrameWithOverlay(
+                                    posX, posY, videoWidth = width, videoHeight = height
                                 )
                                 eglHelper.setPresentationTime(timestamp)
                                 eglHelper.swapBuffers()
