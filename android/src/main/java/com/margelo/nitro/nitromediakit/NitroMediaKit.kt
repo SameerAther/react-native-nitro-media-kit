@@ -49,6 +49,17 @@ class NitroMediaKit : HybridNitroMediaKitSpec() {
         }
     }
 
+    private class MonotonicPts {
+        private var last = -1L
+        fun nextFrom(candidateUs: Long): Long {
+            // Ensure strictly increasing by at least 1us
+            val safe = if (candidateUs <= last) last + 1 else candidateUs
+            last = safe
+            return safe
+        }
+        fun reset() { last = -1L }
+    }
+
     private class PtsTracker {
         var prev = -1L
         var last = -1L
@@ -100,23 +111,21 @@ class NitroMediaKit : HybridNitroMediaKitSpec() {
 
                 val inputSurface = encoder.createInputSurface()
                 encoder.start()
-
+                eglHelper = EglHelper()
+                eglHelper.createEglContext(inputSurface, width, height)
                 val videoFileName = "video_${System.currentTimeMillis()}.mp4"
                 val videoFile = File(
                     applicationContext.getExternalFilesDir(Environment.DIRECTORY_MOVIES),
                     videoFileName
                 )
                 muxer = MediaMuxer(videoFile.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
-
-                eglHelper = EglHelper()
-                eglHelper.createEglContext(inputSurface)
                 eglHelper.loadStaticBitmapTexture(adjustedBitmap) 
                 val totalFrames = (duration * frameRate).toInt()
                 var videoTrackIndex = -1
                 val bufferInfo = MediaCodec.BufferInfo()
-
+                val monoPts = MonotonicPts()
                 for (frameIndex in 0 until totalFrames) {
-                    val ptsUs = (frameIndex * 1_000_000L) / frameRate
+                    val ptsUs = monoPts.nextFrom((frameIndex * 1_000_000L) / frameRate)
                     eglHelper.drawStaticFrame()
                     eglHelper.setPresentationTime(ptsUs * 1000)      // ns
                     eglHelper.swapBuffers()
@@ -271,7 +280,8 @@ class NitroMediaKit : HybridNitroMediaKitSpec() {
                             if (firstPtsUs == -1L) firstPtsUs = samplePts
                             vPts.record(samplePts)
 
-                            info.presentationTimeUs = samplePts - firstPtsUs + videoPresentationTimeUsOffset
+                            val cand = samplePts - firstPtsUs + videoPresentationTimeUsOffset
+                            info.presentationTimeUs = if (cand <= 0) (videoPresentationTimeUsOffset + 1) else cand
                             info.flags              = extractor.sampleFlags
                             muxer.writeSampleData(outputVideoTrackIndex, buffer, info)
                             extractor.advance()
@@ -378,15 +388,13 @@ class NitroMediaKit : HybridNitroMediaKitSpec() {
                     setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1)
                 }
                 encoder = MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_VIDEO_AVC)
-
-                // The input surface must be created only after the encoder is properly configured
                 encoder.configure(outputFormat, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
                 val inputSurface = encoder.createInputSurface()
                 encoder.start()
                 Log.d("HybridMediaKit", "Encoder configured and input surface created successfully")
 
                 eglHelper = EglHelper()
-                eglHelper.createEglContext(inputSurface)
+                eglHelper.createEglContext(inputSurface, width, height) // use decoded width/height
 
                 // Use EglHelper's video surface for the decoder
                 val decoderSurface = eglHelper.getVideoSurface()
@@ -416,7 +424,7 @@ class NitroMediaKit : HybridNitroMediaKitSpec() {
                 var sawEncoderEOS = false
                 var isMuxerStarted = false
                 var outputVideoTrackIndex = -1
-
+                val monoPts = MonotonicPts()
                 while (!sawEncoderEOS) {
                     // Feed decoder input
                     if (!sawDecoderEOS) {
@@ -460,13 +468,13 @@ class NitroMediaKit : HybridNitroMediaKitSpec() {
                             // Release the output buffer first
                             decoder.releaseOutputBuffer(outputBufferIndex, doRender)
                             if (doRender) {
-                                 val timestamp = eglHelper.drawFrameWithOverlay(
+                                val rawTsNs = eglHelper.drawFrameWithOverlay(
                                     posX, posY, videoWidth = width, videoHeight = height
                                 )
-                                eglHelper.setPresentationTime(timestamp)
+                                val ptsUs = monoPts.nextFrom(rawTsNs / 1000L)  // SurfaceTexture gives ns
+                                eglHelper.setPresentationTime(ptsUs * 1000L)   // back to ns
                                 eglHelper.swapBuffers()
                             }
-
                             if ((bufferInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0) {
                                 encoder.signalEndOfInputStream()
                                 decoderOutputAvailable = false
@@ -569,7 +577,7 @@ class NitroMediaKit : HybridNitroMediaKitSpec() {
 
             // EGL setup
             eglHelper = EglHelper()
-            eglHelper.createEglContext(inputSurface)
+            eglHelper.createEglContext(inputSurface, targetWidth, targetHeight)
             val decoderSurface = eglHelper.getVideoSurface()
 
             // Decoder setup
@@ -590,7 +598,7 @@ class NitroMediaKit : HybridNitroMediaKitSpec() {
             var sawEncoderEOS = false
             var isMuxerStarted = false
             var outputVideoTrackIndex = -1
-
+            val monoPts = MonotonicPts()
             while (!sawEncoderEOS) {
                 if (!sawDecoderEOS) {
                     val inputBufferIndex = decoder.dequeueInputBuffer(timeoutUs)
@@ -618,8 +626,9 @@ class NitroMediaKit : HybridNitroMediaKitSpec() {
                             val doRender = bufferInfo.size != 0
                             decoder.releaseOutputBuffer(outputBufferIndex, doRender)
                             if (doRender) {
-                                val timestamp = eglHelper.drawVideoFrame()
-                                eglHelper.setPresentationTime(timestamp)
+                                val rawTsNs = eglHelper.drawVideoFrame()
+                                val ptsUs = monoPts.nextFrom(rawTsNs / 1000L)
+                                eglHelper.setPresentationTime(ptsUs * 1000L)
                                 eglHelper.swapBuffers()
                             }
                             if (bufferInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) {

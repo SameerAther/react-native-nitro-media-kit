@@ -87,7 +87,10 @@ class EglHelper {
         }
     """.trimIndent()
 
-    fun createEglContext(surface: Surface,videoWidth: Int = 0, videoHeight: Int = 0) {
+    fun createEglContext(surface: Surface, videoWidth: Int, videoHeight: Int) {
+        require(videoWidth > 0 && videoHeight > 0) {
+            "createEglContext requires valid video size; got ${videoWidth}x${videoHeight}"
+        }
         this.surface = surface
 
         eglDisplay = EGL14.eglGetDisplay(EGL14.EGL_DEFAULT_DISPLAY)
@@ -106,31 +109,33 @@ class EglHelper {
 
         val configs = arrayOfNulls<EGLConfig>(1)
         val numConfigs = IntArray(1)
-        EGL14.eglChooseConfig(eglDisplay, attribList, 0, configs, 0, configs.size, numConfigs, 0)
+        EGL14.eglChooseConfig(eglDisplay, attribList, 0, configs, 0, 1, numConfigs, 0)
         eglConfig = configs[0]
 
-        val contextAttribs = intArrayOf(
-            EGL14.EGL_CONTEXT_CLIENT_VERSION, 2,
-            EGL14.EGL_NONE
-        )
-        eglContext = EGL14.eglCreateContext(eglDisplay, eglConfig, EGL14.EGL_NO_CONTEXT, contextAttribs, 0)
+        val ctxAttribs = intArrayOf(EGL14.EGL_CONTEXT_CLIENT_VERSION, 2, EGL14.EGL_NONE)
+        eglContext = EGL14.eglCreateContext(eglDisplay, eglConfig, EGL14.EGL_NO_CONTEXT, ctxAttribs, 0)
 
         val surfaceAttribs = intArrayOf(EGL14.EGL_NONE)
         eglSurface = EGL14.eglCreateWindowSurface(eglDisplay, eglConfig, surface, surfaceAttribs, 0)
 
         EGL14.eglMakeCurrent(eglDisplay, eglSurface, eglSurface, eglContext)
-        vpWidth  = if (videoWidth  > 0) videoWidth  else querySurface(EGL14.EGL_WIDTH)
-        vpHeight = if (videoHeight > 0) videoHeight else querySurface(EGL14.EGL_HEIGHT)
+
+        // Lock viewport to encoder size every time to avoid driver weirdness
+        vpWidth = videoWidth
+        vpHeight = videoHeight
         GLES20.glViewport(0, 0, vpWidth, vpHeight)
-        EGL14.eglSurfaceAttrib(
-            eglDisplay, eglSurface,
-            EGL14.EGL_SWAP_BEHAVIOR,
-            EGL14.EGL_BUFFER_DESTROYED   // API-24+
-        )
+
+        // Don’t rely on preserved buffers; redraw every frame
+        EGL14.eglSurfaceAttrib(eglDisplay, eglSurface, EGL14.EGL_SWAP_BEHAVIOR, EGL14.EGL_BUFFER_DESTROYED)
+
         initGL()
-        if (videoWidth > 0 && videoHeight > 0) {
-            videoSurfaceTexture?.setDefaultBufferSize(videoWidth, videoHeight)
+
+        // **This is the big one** — ensure decoder frames land at the right size
+        if (videoSurfaceTexture == null) {
+            // initGL() creates it; ensure it exists first
+            throw IllegalStateException("videoSurfaceTexture not initialized")
         }
+        videoSurfaceTexture!!.setDefaultBufferSize(videoWidth, videoHeight)
     }
 
     fun loadStaticBitmapTexture(bitmap: Bitmap) {
@@ -255,6 +260,18 @@ class EglHelper {
         }
     }
 
+    private fun awaitNewFrame(timeoutMs: Long = 1500) {
+            synchronized(frameSyncObject) {
+                val start = System.nanoTime()
+                while (!frameAvailable) {
+                    val left = timeoutMs - ((System.nanoTime() - start) / 1_000_000L)
+                    if (left <= 0) throw RuntimeException("Frame wait timed out")
+                    frameSyncObject.wait(left)
+                }
+                frameAvailable = false
+            }
+        }
+
     fun checkGlError(op: String) {
         var error: Int
         while (GLES20.glGetError().also { error = it } != GLES20.GL_NO_ERROR) {
@@ -264,21 +281,18 @@ class EglHelper {
     }
 
     fun drawVideoFrame(): Long {
-        ensureViewport()  
-        synchronized(frameSyncObject) {
-            while (!frameAvailable) {
-                frameSyncObject.wait(1000)
-                if (!frameAvailable) throw RuntimeException("Frame wait timed out")
-            }
-            frameAvailable = false
-        }
+        ensureViewport()
+        awaitNewFrame()
+        videoSurfaceTexture?.updateTexImage()
         videoSurfaceTexture?.updateTexImage()
         val timestamp = videoSurfaceTexture?.timestamp ?: 0L
         val stMatrix = FloatArray(16)
         videoSurfaceTexture?.getTransformMatrix(stMatrix)
 
         GLES20.glUseProgram(program)
-        GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
+        GLES20.glDisable(GLES20.GL_SCISSOR_TEST)
+        GLES20.glBlendFunc(GLES20.GL_SRC_ALPHA, GLES20.GL_ONE_MINUS_SRC_ALPHA)
+        GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT or GLES20.GL_DEPTH_BUFFER_BIT)
 
         GLES20.glUniform1i(useVideoTextureHandle, 1) // Use video texture
         GLES20.glUniform1i(useOverlayHandle, 0)      // Disable overlay
@@ -307,22 +321,19 @@ class EglHelper {
     }
 
     fun drawFrameWithOverlay(posX: Float, posY: Float, videoWidth: Int, videoHeight: Int): Long {
-        ensureViewport()  
+        ensureViewport()
         GLES20.glEnable(GLES20.GL_BLEND)
-        synchronized(frameSyncObject) {
-            while (!frameAvailable) {
-                frameSyncObject.wait(1000)
-                if (!frameAvailable) throw RuntimeException("Frame wait timed out")
-            }
-            frameAvailable = false
-        }
+        awaitNewFrame()
+        videoSurfaceTexture?.updateTexImage()
         videoSurfaceTexture?.updateTexImage()
         val timestamp = videoSurfaceTexture?.timestamp ?: 0L
         val stMatrix = FloatArray(16)
         videoSurfaceTexture?.getTransformMatrix(stMatrix)
 
         GLES20.glUseProgram(program)
-        GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
+        GLES20.glDisable(GLES20.GL_SCISSOR_TEST)
+        GLES20.glBlendFunc(GLES20.GL_SRC_ALPHA, GLES20.GL_ONE_MINUS_SRC_ALPHA)
+        GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT or GLES20.GL_DEPTH_BUFFER_BIT)
 
         GLES20.glUniform1i(useVideoTextureHandle, 1) // Use video texture
         GLES20.glUniform1i(useOverlayHandle, 1)     // Enable overlay
@@ -371,7 +382,9 @@ class EglHelper {
         ensureViewport()
 
         GLES20.glUseProgram(program)
-        GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
+        GLES20.glDisable(GLES20.GL_SCISSOR_TEST)
+        GLES20.glBlendFunc(GLES20.GL_SRC_ALPHA, GLES20.GL_ONE_MINUS_SRC_ALPHA)
+        GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT or GLES20.GL_DEPTH_BUFFER_BIT)
         GLES20.glDisable(GLES20.GL_BLEND)
         GLES20.glUniform1i(useVideoTextureHandle, 0) // sampling 2-D texture
         GLES20.glUniform1i(useOverlayHandle,  0)     // no extra overlay
@@ -425,8 +438,8 @@ class EglHelper {
     }
 
     fun swapBuffers() {
-        GLES20.glFlush()
-        EGL14.eglSwapBuffers(eglDisplay, eglSurface)
+      GLES20.glFinish() // ensure all writes hit the surface before swap
+      EGL14.eglSwapBuffers(eglDisplay, eglSurface)
     }
 
     private fun querySurface(what: Int): Int {
@@ -437,7 +450,7 @@ class EglHelper {
 
     private inline fun ensureViewport() {
         GLES20.glViewport(0, 0, vpWidth, vpHeight)
-        GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
+        GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT or GLES20.GL_DEPTH_BUFFER_BIT)
     }
 
     private fun fixOrientation(st: FloatArray): FloatArray {
