@@ -37,15 +37,11 @@ class NitroMediaKit : HybridNitroMediaKitSpec() {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
-    private suspend fun getLocalFilePath(pathOrUrl: String): String {
-        return withContext(Dispatchers.IO) {
-            if (isRemoteUrl(pathOrUrl)) {
-                // Download the remote file and return the local path
-                downloadFile(pathOrUrl)
-            } else {
-                // It's a local file path
-                pathOrUrl
-            }
+    private fun getLocalFilePath(pathOrUrl: String): String {
+        return if (isRemoteUrl(pathOrUrl)) {
+            downloadFile(pathOrUrl)
+        } else {
+            pathOrUrl
         }
     }
 
@@ -77,6 +73,7 @@ class NitroMediaKit : HybridNitroMediaKitSpec() {
             var encoder: MediaCodec? = null
             var muxer: MediaMuxer? = null
             var eglHelper: EglHelper? = null
+            var isMuxerStarted = false
             try {
                 val localImagePath = getLocalFilePath(image)
                 val bitmap = BitmapFactory.decodeFile(localImagePath)
@@ -120,9 +117,10 @@ class NitroMediaKit : HybridNitroMediaKitSpec() {
                 )
                 muxer = MediaMuxer(videoFile.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
                 eglHelper.loadStaticBitmapTexture(adjustedBitmap) 
-                val totalFrames = (duration * frameRate).toInt()
+                val totalFrames = maxOf(2, kotlin.math.round(duration * frameRate).toInt())
                 var videoTrackIndex = -1
                 val bufferInfo = MediaCodec.BufferInfo()
+                isMuxerStarted = false
                 val monoPts = MonotonicPts()
                 for (frameIndex in 0 until totalFrames) {
                     val ptsUs = monoPts.nextFrom((frameIndex * 1_000_000L) / frameRate)
@@ -155,21 +153,27 @@ class NitroMediaKit : HybridNitroMediaKitSpec() {
                 }
                 encoder.signalEndOfInputStream()
 
-                // Drain any remaining output
                 while (true) {
                     val outputBufferIndex = encoder.dequeueOutputBuffer(bufferInfo, 0)
-                    if (outputBufferIndex == MediaCodec.INFO_TRY_AGAIN_LATER) {
-                        break
-                    } else if (outputBufferIndex >= 0) {
-                        val encodedData = encoder.getOutputBuffer(outputBufferIndex)
-                        if (encodedData != null && bufferInfo.size > 0) {
-                            encodedData.position(bufferInfo.offset)
-                            encodedData.limit(bufferInfo.offset + bufferInfo.size)
-                            muxer.writeSampleData(videoTrackIndex, encodedData, bufferInfo)
+                    when (outputBufferIndex) {
+                        MediaCodec.INFO_TRY_AGAIN_LATER -> break
+                        MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> {
+                            val newFormat = encoder.outputFormat
+                            videoTrackIndex = muxer.addTrack(newFormat)
+                            muxer.start()
+                            isMuxerStarted = true
                         }
-                        encoder.releaseOutputBuffer(outputBufferIndex, false)
-                        if (bufferInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) {
-                            break
+                        else -> if (outputBufferIndex >= 0) {
+                            val encodedData = encoder.getOutputBuffer(outputBufferIndex)
+                            if (encodedData != null && bufferInfo.size > 0) {
+                                encodedData.position(bufferInfo.offset)
+                                encodedData.limit(bufferInfo.offset + bufferInfo.size)
+                                muxer.writeSampleData(videoTrackIndex, encodedData, bufferInfo)
+                            }
+                            encoder.releaseOutputBuffer(outputBufferIndex, false)
+                            if ((bufferInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0) {
+                                break
+                            }
                         }
                     }
                 }
@@ -180,9 +184,9 @@ class NitroMediaKit : HybridNitroMediaKitSpec() {
                 throw e
             } finally {
                 eglHelper?.release()
-                muxer?.stop()
+                try { if (isMuxerStarted) muxer?.stop() } catch (_: Throwable) {}
                 muxer?.release()
-                encoder?.stop()
+                try { encoder?.stop() } catch (_: Throwable) {}
                 encoder?.release()
             }
         }
@@ -250,7 +254,8 @@ class NitroMediaKit : HybridNitroMediaKitSpec() {
                 if (videoFormat != null) outputVideoTrackIndex = muxer.addTrack(videoFormat)
                 if (audioFormat != null) outputAudioTrackIndex = muxer.addTrack(audioFormat)
                 muxer.start()
-
+                val vMono = MonotonicPts()
+                val aMono = MonotonicPts()
                // --- Step 5 ---------------------------------------------------------------
                 for (videoPath in videosToMerge) {
                     val extractor = MediaExtractor().apply { setDataSource(videoPath) }
@@ -281,7 +286,7 @@ class NitroMediaKit : HybridNitroMediaKitSpec() {
                             vPts.record(samplePts)
 
                             val cand = samplePts - firstPtsUs + videoPresentationTimeUsOffset
-                            info.presentationTimeUs = if (cand <= 0) (videoPresentationTimeUsOffset + 1) else cand
+                            info.presentationTimeUs = vMono.nextFrom(maxOf(1L, cand))
                             info.flags              = extractor.sampleFlags
                             muxer.writeSampleData(outputVideoTrackIndex, buffer, info)
                             extractor.advance()
@@ -310,7 +315,8 @@ class NitroMediaKit : HybridNitroMediaKitSpec() {
                             if (firstPtsUs == -1L) firstPtsUs = samplePts
                             aPts.record(samplePts)
 
-                            info.presentationTimeUs = samplePts - firstPtsUs + audioPresentationTimeUsOffset
+                            val acand = samplePts - firstPtsUs + audioPresentationTimeUsOffset
+                            info.presentationTimeUs = aMono.nextFrom(maxOf(1L, acand))
                             info.flags              = extractor.sampleFlags
                             muxer.writeSampleData(outputAudioTrackIndex, buffer, info)
                             extractor.advance()
@@ -468,11 +474,9 @@ class NitroMediaKit : HybridNitroMediaKitSpec() {
                             // Release the output buffer first
                             decoder.releaseOutputBuffer(outputBufferIndex, doRender)
                             if (doRender) {
-                                val rawTsNs = eglHelper.drawFrameWithOverlay(
-                                    posX, posY, videoWidth = width, videoHeight = height
-                                )
-                                val ptsUs = monoPts.nextFrom(rawTsNs / 1000L)  // SurfaceTexture gives ns
-                                eglHelper.setPresentationTime(ptsUs * 1000L)   // back to ns
+                                eglHelper.drawFrameWithOverlay(posX, posY, videoWidth = width, videoHeight = height)
+                                val ptsUs = monoPts.nextFrom(bufferInfo.presentationTimeUs) // <- decoder PTS (good)
+                                eglHelper.setPresentationTime(ptsUs * 1000L)
                                 eglHelper.swapBuffers()
                             }
                             if ((bufferInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0) {
@@ -626,8 +630,8 @@ class NitroMediaKit : HybridNitroMediaKitSpec() {
                             val doRender = bufferInfo.size != 0
                             decoder.releaseOutputBuffer(outputBufferIndex, doRender)
                             if (doRender) {
-                                val rawTsNs = eglHelper.drawVideoFrame()
-                                val ptsUs = monoPts.nextFrom(rawTsNs / 1000L)
+                                eglHelper.drawVideoFrame()
+                                val ptsUs = monoPts.nextFrom(bufferInfo.presentationTimeUs) // <- decoder PTS
                                 eglHelper.setPresentationTime(ptsUs * 1000L)
                                 eglHelper.swapBuffers()
                             }
@@ -767,44 +771,44 @@ class NitroMediaKit : HybridNitroMediaKitSpec() {
 
 
     private fun adjustBitmapToSupportedSize(
-    bitmap: Bitmap,
-    videoCapabilities: VideoCapabilities
-): Bitmap {
-    val widthAlignment = videoCapabilities.widthAlignment ?: 2
-    val heightAlignment = videoCapabilities.heightAlignment ?: 2
+        bitmap: Bitmap,
+        videoCapabilities: VideoCapabilities
+    ): Bitmap {
+        val widthAlignment = videoCapabilities.widthAlignment
+        val heightAlignment = videoCapabilities.heightAlignment
 
-    val standardResolutions = listOf(
-        Pair(1920, 1080),
-        Pair(1280, 720),
-        Pair(640, 480)
-    )
+        val standardResolutions = listOf(
+            Pair(1920, 1080),
+            Pair(1280, 720),
+            Pair(640, 480)
+        )
 
-    val aspectRatio = bitmap.width.toFloat() / bitmap.height
+        val aspectRatio = bitmap.width.toFloat() / bitmap.height
 
-    for ((stdWidth, stdHeight) in standardResolutions) {
-        var width = stdWidth - (stdWidth % widthAlignment)
-        var height = stdHeight - (stdHeight % heightAlignment)
+        for ((stdWidth, stdHeight) in standardResolutions) {
+            var width = stdWidth - (stdWidth % widthAlignment)
+            var height = stdHeight - (stdHeight % heightAlignment)
 
-        // Adjust dimensions to maintain aspect ratio
-        if (aspectRatio >= 1) {
-            // Landscape orientation
-            height = (width / aspectRatio).toInt()
-            height -= height % heightAlignment
-        } else {
-            // Portrait orientation
-            width = (height * aspectRatio).toInt()
-            width -= width % widthAlignment
+            // Adjust dimensions to maintain aspect ratio
+            if (aspectRatio >= 1) {
+                // Landscape orientation
+                height = (width / aspectRatio).toInt()
+                height -= height % heightAlignment
+            } else {
+                // Portrait orientation
+                width = (height * aspectRatio).toInt()
+                width -= width % widthAlignment
+            }
+
+            // Ensure dimensions are within encoder's supported ranges
+            if (videoCapabilities.isSizeSupported(width, height)) {
+                Log.d("HybridMediaKit", "Using standard resolution: ${width}x${height}")
+                return Bitmap.createScaledBitmap(bitmap, width, height, true)
+            }
         }
 
-        // Ensure dimensions are within encoder's supported ranges
-        if (videoCapabilities.isSizeSupported(width, height)) {
-            Log.d("HybridMediaKit", "Using standard resolution: ${width}x${height}")
-            return Bitmap.createScaledBitmap(bitmap, width, height, true)
-        }
+        throw IllegalArgumentException("No supported standard resolution found")
     }
-
-    throw IllegalArgumentException("No supported standard resolution found")
-}
 
 
     private fun selectCodec(mimeType: String): MediaCodecInfo? {
