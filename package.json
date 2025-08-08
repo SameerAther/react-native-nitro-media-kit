@@ -1,6 +1,6 @@
 {
   "name": "react-native-nitro-media-kit",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Media Kit Library",
   "main": "./lib/module/index.js",
   "types": "./lib/typescript/src/index.d.ts",
