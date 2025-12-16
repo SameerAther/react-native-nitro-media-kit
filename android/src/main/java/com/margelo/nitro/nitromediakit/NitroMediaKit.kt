@@ -56,6 +56,73 @@ class NitroMediaKit : HybridNitroMediaKitSpec() {
         fun reset() { last = -1L }
     }
 
+    private class MuxerTrackState {
+        var started = false
+        var trackIndex = -1
+        var firstPtsUs = -1L
+        val mono = MonotonicPts()
+    }
+
+    private fun drainEncoderToMuxer(
+        encoder: MediaCodec,
+        muxer: MediaMuxer,
+        state: MuxerTrackState,
+        bufferInfo: MediaCodec.BufferInfo,
+        timeoutUs: Long,
+        untilEos: Boolean
+    ) {
+        var idleRounds = 0
+        while (true) {
+            val outIndex = encoder.dequeueOutputBuffer(bufferInfo, timeoutUs)
+
+            when (outIndex) {
+                MediaCodec.INFO_TRY_AGAIN_LATER -> {
+                    if (!untilEos) return
+                    // During EOS drain, don't bail instantly — give encoder time to flush.
+                    idleRounds++
+                    if (idleRounds >= 50) return
+                }
+
+                MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> {
+                    if (!state.started) {
+                        state.trackIndex = muxer.addTrack(encoder.outputFormat)
+                        muxer.start()
+                        state.started = true
+                    }
+                }
+
+                else -> if (outIndex >= 0) {
+                    idleRounds = 0
+                    val encodedData = encoder.getOutputBuffer(outIndex)
+
+                    if (encodedData != null) {
+                        val isCodecConfig = (bufferInfo.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG) != 0
+                        val hasData = bufferInfo.size > 0
+
+                        if (!isCodecConfig && hasData && state.started) {
+                            encodedData.position(bufferInfo.offset)
+                            encodedData.limit(bufferInfo.offset + bufferInfo.size)
+
+                            if (state.firstPtsUs < 0) state.firstPtsUs = bufferInfo.presentationTimeUs
+                            val normPts = maxOf(0L, bufferInfo.presentationTimeUs - state.firstPtsUs)
+                            val safePts = state.mono.nextFrom(normPts)
+
+                            val writeInfo = MediaCodec.BufferInfo().apply {
+                                set(bufferInfo.offset, bufferInfo.size, safePts, bufferInfo.flags)
+                            }
+                            muxer.writeSampleData(state.trackIndex, encodedData, writeInfo)
+                        }
+                    }
+
+                    encoder.releaseOutputBuffer(outIndex, false)
+
+                    val eos = (bufferInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0
+                    if (eos) return
+                }
+            }
+        }
+    }
+
     private class PtsTracker {
         var prev = -1L
         var last = -1L
@@ -73,28 +140,24 @@ class NitroMediaKit : HybridNitroMediaKitSpec() {
             var encoder: MediaCodec? = null
             var muxer: MediaMuxer? = null
             var eglHelper: EglHelper? = null
-            var isMuxerStarted = false
+
+            val bufferInfo = MediaCodec.BufferInfo()
+            val muxState = MuxerTrackState()
+
             try {
                 val localImagePath = getLocalFilePath(image)
                 val bitmap = BitmapFactory.decodeFile(localImagePath)
                     ?: throw IOException("Cannot decode image at path: $localImagePath")
 
-                Log.d("HybridMediaKit", "Original bitmap dimensions: ${bitmap.width}x${bitmap.height}")
-
-                // Validate codec capabilities
                 val codecInfo = selectCodec(MediaFormat.MIMETYPE_VIDEO_AVC)
                     ?: throw IllegalStateException("No suitable codec found")
                 val capabilities = codecInfo.getCapabilitiesForType(MediaFormat.MIMETYPE_VIDEO_AVC)
-                val videoCapabilities = capabilities.videoCapabilities
-
-                // Adjust bitmap to supported size
-                val adjustedBitmap = adjustBitmapToSupportedSize(bitmap, videoCapabilities)
-                Log.d("HybridMediaKit", "Adjusted bitmap dimensions: ${adjustedBitmap.width}x${adjustedBitmap.height}")
+                val adjustedBitmap = adjustBitmapToSupportedSize(bitmap, capabilities.videoCapabilities)
 
                 val width = adjustedBitmap.width
                 val height = adjustedBitmap.height
                 val frameRate = 30
-                val bitRate = 2000000
+                val bitRate = 2_000_000
 
                 val mediaFormat = MediaFormat.createVideoFormat(MediaFormat.MIMETYPE_VIDEO_AVC, width, height).apply {
                     setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface)
@@ -103,91 +166,64 @@ class NitroMediaKit : HybridNitroMediaKitSpec() {
                     setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1)
                 }
 
-                encoder = MediaCodec.createByCodecName(codecInfo.name)
-                encoder.configure(mediaFormat, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
+                encoder = MediaCodec.createByCodecName(codecInfo.name).apply {
+                    configure(mediaFormat, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
+                }
 
-                val inputSurface = encoder.createInputSurface()
-                encoder.start()
-                eglHelper = EglHelper()
-                eglHelper.createEglContext(inputSurface, width, height)
-                val videoFileName = "video_${System.currentTimeMillis()}.mp4"
+                val inputSurface = encoder!!.createInputSurface()
+                encoder!!.start()
+
+                eglHelper = EglHelper().apply {
+                    createEglContext(inputSurface, width, height)
+                    loadStaticBitmapTexture(adjustedBitmap)
+                }
+
                 val videoFile = File(
                     applicationContext.getExternalFilesDir(Environment.DIRECTORY_MOVIES),
-                    videoFileName
+                    "video_${System.currentTimeMillis()}.mp4"
                 )
                 muxer = MediaMuxer(videoFile.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
-                eglHelper.loadStaticBitmapTexture(adjustedBitmap) 
+
                 val totalFrames = maxOf(2, kotlin.math.round(duration * frameRate).toInt())
-                var videoTrackIndex = -1
-                val bufferInfo = MediaCodec.BufferInfo()
-                isMuxerStarted = false
-                val monoPts = MonotonicPts()
+                val ptsMono = MonotonicPts()
+
                 for (frameIndex in 0 until totalFrames) {
-                    val ptsUs = monoPts.nextFrom((frameIndex * 1_000_000L) / frameRate)
-                    eglHelper.drawStaticFrame()
-                    eglHelper.setPresentationTime(ptsUs * 1000)      // ns
-                    eglHelper.swapBuffers()
+                    val ptsUs = ptsMono.nextFrom((frameIndex * 1_000_000L) / frameRate)
 
-                    // Drain encoder output
-                    while (true) {
-                        val outputBufferIndex = encoder.dequeueOutputBuffer(bufferInfo, 0)
-                        if (outputBufferIndex == MediaCodec.INFO_TRY_AGAIN_LATER) {
-                            break
-                        } else if (outputBufferIndex == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
-                            val newFormat = encoder.outputFormat
-                            videoTrackIndex = muxer.addTrack(newFormat)
-                            muxer.start()
-                        } else if (outputBufferIndex >= 0) {
-                            val encodedData = encoder.getOutputBuffer(outputBufferIndex)
-                            if (encodedData != null && bufferInfo.size > 0) {
-                                encodedData.position(bufferInfo.offset)
-                                encodedData.limit(bufferInfo.offset + bufferInfo.size)
-                                muxer.writeSampleData(videoTrackIndex, encodedData, bufferInfo)
-                            }
-                            encoder.releaseOutputBuffer(outputBufferIndex, false)
-                            if (bufferInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) {
-                                break
-                            }
-                        }
-                    }
-                }
-                encoder.signalEndOfInputStream()
+                    eglHelper!!.drawStaticFrame()
+                    eglHelper!!.setPresentationTime(ptsUs * 1000L)
+                    eglHelper!!.swapBuffers()
 
-                while (true) {
-                    val outputBufferIndex = encoder.dequeueOutputBuffer(bufferInfo, 0)
-                    when (outputBufferIndex) {
-                        MediaCodec.INFO_TRY_AGAIN_LATER -> break
-                        MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> {
-                            val newFormat = encoder.outputFormat
-                            videoTrackIndex = muxer.addTrack(newFormat)
-                            muxer.start()
-                            isMuxerStarted = true
-                        }
-                        else -> if (outputBufferIndex >= 0) {
-                            val encodedData = encoder.getOutputBuffer(outputBufferIndex)
-                            if (encodedData != null && bufferInfo.size > 0) {
-                                encodedData.position(bufferInfo.offset)
-                                encodedData.limit(bufferInfo.offset + bufferInfo.size)
-                                muxer.writeSampleData(videoTrackIndex, encodedData, bufferInfo)
-                            }
-                            encoder.releaseOutputBuffer(outputBufferIndex, false)
-                            if ((bufferInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0) {
-                                break
-                            }
-                        }
-                    }
+                    // drain what’s available (non-blocking)
+                    drainEncoderToMuxer(
+                        encoder = encoder!!,
+                        muxer = muxer!!,
+                        state = muxState,
+                        bufferInfo = bufferInfo,
+                        timeoutUs = 0L,
+                        untilEos = false
+                    )
                 }
+
+                encoder!!.signalEndOfInputStream()
+
+                // IMPORTANT: fully drain until EOS
+                drainEncoderToMuxer(
+                    encoder = encoder!!,
+                    muxer = muxer!!,
+                    state = muxState,
+                    bufferInfo = bufferInfo,
+                    timeoutUs = 10_000L,
+                    untilEos = true
+                )
 
                 videoFile.absolutePath
-            } catch (e: Exception) {
-                Log.e("HybridMediaKit", "Error converting image to video: ${e.message}")
-                throw e
             } finally {
                 eglHelper?.release()
-                try { if (isMuxerStarted) muxer?.stop() } catch (_: Throwable) {}
-                muxer?.release()
-                try { encoder?.stop() } catch (_: Throwable) {}
-                encoder?.release()
+                runCatching { encoder?.stop() }
+                runCatching { encoder?.release() }
+                if (muxState.started) runCatching { muxer?.stop() }
+                runCatching { muxer?.release() }
             }
         }
     }
@@ -202,34 +238,33 @@ class NitroMediaKit : HybridNitroMediaKitSpec() {
 
             try {
                 // Step 1: Analyze all videos
-                val propertiesCounts = mutableMapOf<VideoProperties, Int>()
+                val counts = mutableMapOf<String, Int>()
+                val sigToProps = mutableMapOf<String, VideoProperties>()
+
                 for (video in videos) {
-                    val localVideoPath = getLocalFilePath(video)
-                    val props = getVideoProperties(localVideoPath)
-                    propertiesCounts[props] = propertiesCounts.getOrDefault(props, 0) + 1
+                    val local = getLocalFilePath(video)
+                    val sig = videoSignature(local)
+                    counts[sig] = (counts[sig] ?: 0) + 1
+                    sigToProps[sig] = getVideoProperties(local) // still used for width/height/fps target
                 }
-                val targetProps = propertiesCounts.maxByOrNull { it.value }?.key
+                val targetSig = counts.maxByOrNull { it.value }?.key
                     ?: throw IllegalArgumentException("No videos to merge")
 
+                val targetProps = sigToProps[targetSig]!!
                 // Step 2: Prepare videos (re-encode non-matching ones)
                 val videosToMerge = mutableListOf<String>()
                 for (video in videos) {
-                    val localVideoPath = getLocalFilePath(video)
-                    val props = getVideoProperties(localVideoPath)
-                    if (props == targetProps) {
-                        videosToMerge.add(localVideoPath)
+                    val local = getLocalFilePath(video)
+                    val sig = videoSignature(local)
+
+                    if (sig == targetSig) {
+                        videosToMerge.add(local)
                     } else {
-                        val reencodedPath = reencodeVideo(
-                            localVideoPath,
-                            targetProps.width,
-                            targetProps.height,
-                            targetProps.frameRate
-                        )
+                        val reencodedPath = reencodeVideo(local, targetProps.width, targetProps.height, targetProps.frameRate)
                         videosToMerge.add(reencodedPath)
                         tempFiles.add(reencodedPath)
                     }
                 }
-
                 // Step 3: Output file + muxer
                 val videoFile = File(
                     applicationContext.getExternalFilesDir(Environment.DIRECTORY_MOVIES),
@@ -269,32 +304,33 @@ class NitroMediaKit : HybridNitroMediaKitSpec() {
                 // Step 5: Copy samples (separate extractors inside copyTrack)
                 val vMono = MonotonicPts()
                 val aMono = MonotonicPts()
-                var videoOffsetUs = 0L
-                var audioOffsetUs = 0L
+                var timelineUs = 0L
 
                 for (videoPath in videosToMerge) {
-                    if (outputVideoTrackIndex != -1) {
-                        videoOffsetUs += copyTrack(
+                    val vDur = if (outputVideoTrackIndex != -1) {
+                        copyTrack(
                             srcPath = videoPath,
                             mimePrefix = "video/",
                             muxer = outMuxer,
                             outTrackIndex = outputVideoTrackIndex,
-                            ptsOffsetUs = videoOffsetUs,
+                            ptsOffsetUs = timelineUs,
                             mono = vMono
                         )
-                    }
-                    if (outputAudioTrackIndex != -1) {
-                        audioOffsetUs += copyTrack(
+                    } else 0L
+
+                    val aDur = if (outputAudioTrackIndex != -1) {
+                        copyTrack(
                             srcPath = videoPath,
                             mimePrefix = "audio/",
                             muxer = outMuxer,
                             outTrackIndex = outputAudioTrackIndex,
-                            ptsOffsetUs = audioOffsetUs,
+                            ptsOffsetUs = timelineUs,
                             mono = aMono
                         )
-                    }
-                }
+                    } else 0L
 
+                    timelineUs += maxOf(vDur, aDur)
+                }
                 videoFile.absolutePath
             } catch (e: Exception) {
                 Log.e("MediaKit", "Merge failed", e)
@@ -320,360 +356,416 @@ class NitroMediaKit : HybridNitroMediaKitSpec() {
             var muxer: MediaMuxer? = null
             var eglHelper: EglHelper? = null
 
+            var muxerStarted = false
+            var outVideoTrackIndex = -1
+            var outAudioTrackIndex = -1
+
             try {
-                Log.d("HybridMediaKit", "Starting watermarkVideo with video=$video, watermark=$watermark, position=$position")
-
-                // Get local video path
                 val localVideoPath = getLocalFilePath(video)
-                Log.d("HybridMediaKit", "Local video path: $localVideoPath")
 
-                extractor = MediaExtractor()
-                extractor.setDataSource(localVideoPath)
+                extractor = MediaExtractor().apply { setDataSource(localVideoPath) }
 
-                // Find video track
+                // ---- Find tracks (video + audio format for passthrough) ----
                 var videoTrackIndex = -1
-                for (i in 0 until extractor.trackCount) {
-                    val format = extractor.getTrackFormat(i)
+                var audioFormat: MediaFormat? = null
+
+                for (i in 0 until extractor!!.trackCount) {
+                    val format = extractor!!.getTrackFormat(i)
                     val mime = format.getString(MediaFormat.KEY_MIME) ?: ""
-                    Log.d("HybridMediaKit", "Track $i MIME type: $mime")
-                    if (mime.startsWith("video/") && videoTrackIndex == -1) {
-                        videoTrackIndex = i
-                        Log.d("HybridMediaKit", "Selected video track index: $videoTrackIndex")
-                    }
+                    if (mime.startsWith("video/") && videoTrackIndex == -1) videoTrackIndex = i
+                    if (mime.startsWith("audio/") && audioFormat == null) audioFormat = format
                 }
 
                 if (videoTrackIndex == -1) {
                     throw IllegalArgumentException("No video track found in $localVideoPath")
                 }
 
-                // Set up decoder
-                extractor.selectTrack(videoTrackIndex)
-                val inputFormat = extractor.getTrackFormat(videoTrackIndex)
+                extractor!!.selectTrack(videoTrackIndex)
+                extractor!!.seekTo(0, MediaExtractor.SEEK_TO_CLOSEST_SYNC)
+
+                val inputFormat = extractor!!.getTrackFormat(videoTrackIndex)
                 val width = inputFormat.getIntegerOrDefault(MediaFormat.KEY_WIDTH, "KEY_WIDTH")
                 val height = inputFormat.getIntegerOrDefault(MediaFormat.KEY_HEIGHT, "KEY_HEIGHT")
-                val mime = inputFormat.getString(MediaFormat.KEY_MIME)
+                val inputMime = inputFormat.getString(MediaFormat.KEY_MIME) ?: throw IllegalArgumentException("Missing MIME")
 
-                // Set up encoder
+                val frameRate = if (inputFormat.containsKey(MediaFormat.KEY_FRAME_RATE)) {
+                    inputFormat.getInteger(MediaFormat.KEY_FRAME_RATE).coerceIn(1, 120)
+                } else 30
+
+                // ---- Encoder ----
                 val outputFormat = MediaFormat.createVideoFormat(MediaFormat.MIMETYPE_VIDEO_AVC, width, height).apply {
                     setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface)
-                    setInteger(MediaFormat.KEY_BIT_RATE, 2000000) // Default bit rate
-                    setInteger(MediaFormat.KEY_FRAME_RATE, 30) // Default frame rate
+                    setInteger(MediaFormat.KEY_BIT_RATE, 2_000_000)
+                    setInteger(MediaFormat.KEY_FRAME_RATE, frameRate)
                     setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1)
                 }
-                encoder = MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_VIDEO_AVC)
-                encoder.configure(outputFormat, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
-                val inputSurface = encoder.createInputSurface()
-                encoder.start()
-                Log.d("HybridMediaKit", "Encoder configured and input surface created successfully")
 
-                eglHelper = EglHelper()
-                eglHelper.createEglContext(inputSurface, width, height) // use decoded width/height
+                encoder = MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_VIDEO_AVC).apply {
+                    configure(outputFormat, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
+                }
+                val inputSurface = encoder!!.createInputSurface()
+                encoder!!.start()
 
-                // Use EglHelper's video surface for the decoder
-                val decoderSurface = eglHelper.getVideoSurface()
-                decoder = MediaCodec.createDecoderByType(mime!!)
-                decoder.configure(inputFormat, decoderSurface, null, 0)
-                decoder.start()
-                Log.d("HybridMediaKit", "Decoder configured successfully")
+                // ---- EGL ----
+                eglHelper = EglHelper().apply {
+                    createEglContext(inputSurface, width, height)
+                }
 
-                // Set up muxer
-                val outputFileName = "watermarked_video_${System.currentTimeMillis()}.mp4"
+                // ---- Decoder (to EGL surface) ----
+                val decoderSurface = eglHelper!!.getVideoSurface()
+                decoder = MediaCodec.createDecoderByType(inputMime).apply {
+                    configure(inputFormat, decoderSurface, null, 0)
+                    start()
+                }
+
+                // ---- Muxer ----
                 val outputFile = File(
                     applicationContext.getExternalFilesDir(Environment.DIRECTORY_MOVIES),
-                    outputFileName
+                    "watermarked_video_${System.currentTimeMillis()}.mp4"
                 )
                 muxer = MediaMuxer(outputFile.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
-                Log.d("HybridMediaKit", "Muxer initialized at path: ${outputFile.absolutePath}")
 
-                // Prepare watermark bitmap
-                val watermarkBitmap = eglHelper.createTextBitmap(watermark, 64f, Color.WHITE)
-                eglHelper.setOverlayBitmap(watermarkBitmap) // Load the bitmap into the texture
+                // Add audio track BEFORE muxer.start() (video track added later on format change)
+                outAudioTrackIndex = if (audioFormat != null) muxer!!.addTrack(audioFormat!!) else -1
+
+                // ---- Watermark overlay ----
+                val watermarkBitmap = eglHelper!!.createTextBitmap(watermark, 64f, Color.WHITE)
+                eglHelper!!.setOverlayBitmap(watermarkBitmap)
                 val (posX, posY) = calculateWatermarkPosition(position, watermarkBitmap, width, height)
-                Log.d("HybridMediaKit", "Watermark bitmap created at position: ($posX, $posY)")
 
-                val bufferInfo = MediaCodec.BufferInfo()
-                val timeoutUs = 10000L
+                // ---- Timing (normalize to 0 + monotonic) ----
+                val decInfo = MediaCodec.BufferInfo()
+                val encInfo = MediaCodec.BufferInfo()
+
                 var sawDecoderEOS = false
+                var signaledEncoderEOS = false
                 var sawEncoderEOS = false
-                var isMuxerStarted = false
-                var outputVideoTrackIndex = -1
-                val monoPts = MonotonicPts()
+
+                var firstVideoPtsUs = -1L
+                val renderPtsMono = MonotonicPts()
+
+                var firstEncPtsUs = -1L
+                val writePtsMono = MonotonicPts()
+
+                val timeoutUs = 10_000L
+                var eosDrainIdleRounds = 0
+
                 while (!sawEncoderEOS) {
-                    // Feed decoder input
+                    // ---- Feed decoder input ----
                     if (!sawDecoderEOS) {
-                        val inputBufferIndex = decoder.dequeueInputBuffer(timeoutUs)
-                        if (inputBufferIndex >= 0) {
-                            val inputBuffer = decoder.getInputBuffer(inputBufferIndex)!!
-                            val sampleSize = extractor.readSampleData(inputBuffer, 0)
-                            if (sampleSize < 0) {
-                                decoder.queueInputBuffer(
-                                    inputBufferIndex,
-                                    0,
-                                    0,
-                                    0L,
+                        val inIndex = decoder!!.dequeueInputBuffer(timeoutUs)
+                        if (inIndex >= 0) {
+                            val inBuf = decoder!!.getInputBuffer(inIndex)!!
+                            val size = extractor!!.readSampleData(inBuf, 0)
+
+                            if (size < 0) {
+                                decoder!!.queueInputBuffer(
+                                    inIndex, 0, 0, 0L,
                                     MediaCodec.BUFFER_FLAG_END_OF_STREAM
                                 )
                                 sawDecoderEOS = true
                             } else {
-                                val presentationTimeUs = extractor.sampleTime
-                                decoder.queueInputBuffer(
-                                    inputBufferIndex,
-                                    0,
-                                    sampleSize,
-                                    presentationTimeUs,
-                                    0
-                                )
-                                extractor.advance()
+                                val ptsUs = extractor!!.sampleTime
+                                decoder!!.queueInputBuffer(inIndex, 0, size, ptsUs, 0)
+                                extractor!!.advance()
                             }
                         }
                     }
 
-                    // Drain decoder output
-                    var decoderOutputAvailable = true
-                    while (decoderOutputAvailable) {
-                        val outputBufferIndex = decoder.dequeueOutputBuffer(bufferInfo, timeoutUs)
-                        if (outputBufferIndex == MediaCodec.INFO_TRY_AGAIN_LATER) {
-                            decoderOutputAvailable = false
-                        } else if (outputBufferIndex == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
-                            // Handle format change
-                        } else if (outputBufferIndex >= 0) {
-                            val doRender = shouldRenderDecodedToSurface(bufferInfo)
-                            decoder.releaseOutputBuffer(outputBufferIndex, doRender)
-                            if (doRender) {
-                                eglHelper.drawFrameWithOverlay(posX, posY, videoWidth = width, videoHeight = height)
-                                val ptsUs = monoPts.nextFrom(bufferInfo.presentationTimeUs) // <- decoder PTS (good)
-                                eglHelper.setPresentationTime(ptsUs * 1000L)
-                                eglHelper.swapBuffers()
-                            }
-                            if ((bufferInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0) {
-                                encoder.signalEndOfInputStream()
-                                decoderOutputAvailable = false
+                    // ---- Drain decoder output -> render -> encoder surface ----
+                    var decoderOut = true
+                    while (decoderOut) {
+                        val outIndex = decoder!!.dequeueOutputBuffer(decInfo, timeoutUs)
+                        when (outIndex) {
+                            MediaCodec.INFO_TRY_AGAIN_LATER -> decoderOut = false
+                            MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> Unit
+                            else -> if (outIndex >= 0) {
+                                val doRender = shouldRenderDecodedToSurface(decInfo)
+                                decoder!!.releaseOutputBuffer(outIndex, doRender)
+
+                                if (doRender) {
+                                    if (firstVideoPtsUs < 0) firstVideoPtsUs = decInfo.presentationTimeUs
+                                    val normPtsUs = maxOf(0L, decInfo.presentationTimeUs - firstVideoPtsUs)
+                                    val safePtsUs = renderPtsMono.nextFrom(normPtsUs)
+
+                                    eglHelper!!.drawFrameWithOverlay(posX, posY, videoWidth = width, videoHeight = height)
+                                    eglHelper!!.setPresentationTime(safePtsUs * 1000L)
+                                    eglHelper!!.swapBuffers()
+                                }
+
+                                val eos = (decInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0
+                                if (eos && !signaledEncoderEOS) {
+                                    encoder!!.signalEndOfInputStream()
+                                    signaledEncoderEOS = true
+                                    decoderOut = false
+                                }
                             }
                         }
                     }
 
-                    // Drain encoder output
-                    var encoderOutputAvailable = true
-                    while (encoderOutputAvailable) {
-                        val outIndex = encoder.dequeueOutputBuffer(bufferInfo, timeoutUs)
-
+                    // ---- Drain encoder output -> muxer ----
+                    var encoderOut = true
+                    while (encoderOut) {
+                        val outIndex = encoder!!.dequeueOutputBuffer(encInfo, timeoutUs)
                         when (outIndex) {
                             MediaCodec.INFO_TRY_AGAIN_LATER -> {
-                                encoderOutputAvailable = false
+                                if (signaledEncoderEOS) {
+                                    eosDrainIdleRounds++
+                                    if (eosDrainIdleRounds >= 50) encoderOut = false
+                                } else {
+                                    encoderOut = false
+                                }
                             }
 
                             MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> {
-                                if (isMuxerStarted) throw RuntimeException("Format changed twice")
-
-                                val newFormat = encoder.outputFormat
-                                outputVideoTrackIndex = muxer!!.addTrack(newFormat)
+                                if (muxerStarted) throw RuntimeException("Encoder format changed twice")
+                                outVideoTrackIndex = muxer!!.addTrack(encoder!!.outputFormat)
                                 muxer!!.start()
-                                isMuxerStarted = true
+                                muxerStarted = true
                             }
 
                             else -> if (outIndex >= 0) {
-                                val encodedData = encoder.getOutputBuffer(outIndex)
+                                eosDrainIdleRounds = 0
+
+                                val encodedData = encoder!!.getOutputBuffer(outIndex)
                                     ?: throw RuntimeException("Encoder output buffer $outIndex was null")
 
-                                // ✅ Skip codec config buffers (muxer gets CSD from INFO_OUTPUT_FORMAT_CHANGED)
-                                if ((bufferInfo.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG) != 0) {
-                                    encoder.releaseOutputBuffer(outIndex, false)
+                                val isCodecConfig = (encInfo.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG) != 0
+                                val isEos = (encInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0
+
+                                if (isCodecConfig) {
+                                    encoder!!.releaseOutputBuffer(outIndex, false)
                                     continue
                                 }
 
-                                // ✅ Safety: don't write before muxer is started
-                                if (!isMuxerStarted) {
-                                    encoder.releaseOutputBuffer(outIndex, false)
-                                    continue
+                                if (muxerStarted && encInfo.size > 0) {
+                                    encodedData.position(encInfo.offset)
+                                    encodedData.limit(encInfo.offset + encInfo.size)
+
+                                    if (firstEncPtsUs < 0) firstEncPtsUs = encInfo.presentationTimeUs
+                                    val normPtsUs = maxOf(0L, encInfo.presentationTimeUs - firstEncPtsUs)
+                                    val safePtsUs = writePtsMono.nextFrom(normPtsUs)
+
+                                    val writeInfo = MediaCodec.BufferInfo().apply {
+                                        set(encInfo.offset, encInfo.size, safePtsUs, encInfo.flags)
+                                    }
+
+                                    muxer!!.writeSampleData(outVideoTrackIndex, encodedData, writeInfo)
                                 }
 
-                                if (bufferInfo.size > 0) {
-                                    encodedData.position(bufferInfo.offset)
-                                    encodedData.limit(bufferInfo.offset + bufferInfo.size)
-                                    muxer!!.writeSampleData(outputVideoTrackIndex, encodedData, bufferInfo)
-                                }
+                                encoder!!.releaseOutputBuffer(outIndex, false)
 
-                                encoder.releaseOutputBuffer(outIndex, false)
-
-                                if ((bufferInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0) {
+                                if (isEos) {
                                     sawEncoderEOS = true
-                                    encoderOutputAvailable = false
+                                    encoderOut = false
                                 }
                             }
                         }
                     }
                 }
 
-                Log.d("HybridMediaKit", "Watermarking completed. Output file: ${outputFile.absolutePath}")
-                outputFile.absolutePath
-            } catch (e: Exception) {
-                Log.e("HybridMediaKit", "Error applying watermark", e)
-                throw e
-            } finally {
-                try {
-                    extractor?.release()
-                    decoder?.stop()
-                    decoder?.release()
-                    encoder?.stop()
-                    encoder?.release()
-                    muxer?.stop()
-                    muxer?.release()
-                    eglHelper?.release()
-                } catch (e: Exception) {
-                    Log.e("HybridMediaKit", "Error releasing resources", e)
+                // ---- Copy audio (passthrough) ----
+                if (muxerStarted && outAudioTrackIndex != -1) {
+                    copyTrack(
+                        srcPath = localVideoPath,
+                        mimePrefix = "audio/",
+                        muxer = muxer!!,
+                        outTrackIndex = outAudioTrackIndex,
+                        ptsOffsetUs = 0L,
+                        mono = MonotonicPts()
+                    )
                 }
+
+                outputFile.absolutePath
+            } finally {
+                runCatching { extractor?.release() }
+                runCatching { decoder?.stop(); decoder?.release() }
+                runCatching { encoder?.stop(); encoder?.release() }
+                if (muxerStarted) runCatching { muxer?.stop() }
+                runCatching { muxer?.release() }
+                runCatching { eglHelper?.release() }
             }
         }
     }
 
-    private fun reencodeVideo(inputPath: String, targetWidth: Int, targetHeight: Int, targetFrameRate: Float): String {
-        var extractor: MediaExtractor? = null
+
+    private fun reencodeVideo(
+        inputPath: String,
+        targetWidth: Int,
+        targetHeight: Int,
+        targetFrameRate: Float
+    ): String {
+        var videoExtractor: MediaExtractor? = null
         var decoder: MediaCodec? = null
         var encoder: MediaCodec? = null
         var muxer: MediaMuxer? = null
         var eglHelper: EglHelper? = null
 
+        val bufferInfo = MediaCodec.BufferInfo()
+        val muxState = MuxerTrackState()
+
         try {
-            extractor = MediaExtractor()
-            extractor.setDataSource(inputPath)
+            videoExtractor = MediaExtractor().apply { setDataSource(inputPath) }
 
             var videoTrackIndex = -1
-            for (i in 0 until extractor.trackCount) {
-                val format = extractor.getTrackFormat(i)
-                if (format.getString(MediaFormat.KEY_MIME)?.startsWith("video/") == true) {
-                    videoTrackIndex = i
-                    break
-                }
+            var audioFormat: MediaFormat? = null
+
+            for (i in 0 until videoExtractor!!.trackCount) {
+                val format = videoExtractor!!.getTrackFormat(i)
+                val mime = format.getString(MediaFormat.KEY_MIME) ?: ""
+                if (mime.startsWith("video/") && videoTrackIndex == -1) videoTrackIndex = i
+                if (mime.startsWith("audio/") && audioFormat == null) audioFormat = format
             }
             if (videoTrackIndex == -1) throw IllegalArgumentException("No video track in $inputPath")
 
-            extractor.selectTrack(videoTrackIndex)
-            val inputFormat = extractor.getTrackFormat(videoTrackIndex)
-            val mime = inputFormat.getString(MediaFormat.KEY_MIME)!!
+            videoExtractor!!.selectTrack(videoTrackIndex)
+            videoExtractor!!.seekTo(0, MediaExtractor.SEEK_TO_CLOSEST_SYNC)
 
-            // Encoder setup
-            val outputFormat = MediaFormat.createVideoFormat(MediaFormat.MIMETYPE_VIDEO_AVC, targetWidth, targetHeight).apply {
+            val inputFormat = videoExtractor!!.getTrackFormat(videoTrackIndex)
+            val inputMime = inputFormat.getString(MediaFormat.KEY_MIME)!!
+
+            val outputFormat = MediaFormat.createVideoFormat(
+                MediaFormat.MIMETYPE_VIDEO_AVC,
+                targetWidth,
+                targetHeight
+            ).apply {
                 setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface)
-                setInteger(MediaFormat.KEY_BIT_RATE, 2000000)
+                setInteger(MediaFormat.KEY_BIT_RATE, 2_000_000)
                 setInteger(MediaFormat.KEY_FRAME_RATE, targetFrameRate.toInt().coerceAtLeast(1))
                 setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1)
             }
-            encoder = MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_VIDEO_AVC)
-            encoder.configure(outputFormat, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
-            val inputSurface = encoder.createInputSurface()
-            encoder.start()
 
-            // EGL setup
-            eglHelper = EglHelper()
-            eglHelper.createEglContext(inputSurface, targetWidth, targetHeight)
-            val decoderSurface = eglHelper.getVideoSurface()
+            encoder = MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_VIDEO_AVC).apply {
+                configure(outputFormat, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
+            }
+            val inputSurface = encoder!!.createInputSurface()
+            encoder!!.start()
 
-            // Decoder setup
-            decoder = MediaCodec.createDecoderByType(mime)
-            decoder.configure(inputFormat, decoderSurface, null, 0)
-            decoder.start()
+            eglHelper = EglHelper().apply {
+                createEglContext(inputSurface, targetWidth, targetHeight)
+            }
+            val decoderSurface = eglHelper!!.getVideoSurface()
 
-            // Muxer setup
+            decoder = MediaCodec.createDecoderByType(inputMime).apply {
+                configure(inputFormat, decoderSurface, null, 0)
+                start()
+            }
+
             val outputFile = File(
                 applicationContext.getExternalFilesDir(Environment.DIRECTORY_MOVIES),
                 "reencoded_${System.currentTimeMillis()}.mp4"
             )
             muxer = MediaMuxer(outputFile.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
 
-            val bufferInfo = MediaCodec.BufferInfo()
-            val timeoutUs = 10000L
+            // Add audio track BEFORE muxer.start() (muxer starts later on encoder format change)
+            val outAudioTrackIndex = if (audioFormat != null) muxer!!.addTrack(audioFormat!!) else -1
+
+            val timeoutUs = 10_000L
             var sawDecoderEOS = false
-            var sawEncoderEOS = false
-            var isMuxerStarted = false
-            var outputVideoTrackIndex = -1
-            val monoPts = MonotonicPts()
-            while (!sawEncoderEOS) {
+            var signaledEncoderEOS = false
+
+            var firstDecoderPtsUs = -1L
+            val ptsMono = MonotonicPts()
+
+            while (true) {
+                // ---- Feed decoder input ----
                 if (!sawDecoderEOS) {
-                    val inputBufferIndex = decoder.dequeueInputBuffer(timeoutUs)
-                    if (inputBufferIndex >= 0) {
-                        val inputBuffer = decoder.getInputBuffer(inputBufferIndex)!!
-                        val sampleSize = extractor.readSampleData(inputBuffer, 0)
-                        if (sampleSize < 0) {
-                            decoder.queueInputBuffer(inputBufferIndex, 0, 0, 0L, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
+                    val inIndex = decoder!!.dequeueInputBuffer(timeoutUs)
+                    if (inIndex >= 0) {
+                        val inBuf = decoder!!.getInputBuffer(inIndex)!!
+                        val size = videoExtractor!!.readSampleData(inBuf, 0)
+                        if (size < 0) {
+                            decoder!!.queueInputBuffer(
+                                inIndex, 0, 0, 0L,
+                                MediaCodec.BUFFER_FLAG_END_OF_STREAM
+                            )
                             sawDecoderEOS = true
                         } else {
-                            val presentationTimeUs = extractor.sampleTime
-                            decoder.queueInputBuffer(inputBufferIndex, 0, sampleSize, presentationTimeUs, 0)
-                            extractor.advance()
+                            val pts = videoExtractor!!.sampleTime
+                            decoder!!.queueInputBuffer(inIndex, 0, size, pts, 0)
+                            videoExtractor!!.advance()
                         }
                     }
                 }
 
-                var decoderOutputAvailable = true
-                while (decoderOutputAvailable) {
-                    val outputBufferIndex = decoder.dequeueOutputBuffer(bufferInfo, timeoutUs)
-                    when (outputBufferIndex) {
-                        MediaCodec.INFO_TRY_AGAIN_LATER -> decoderOutputAvailable = false
-                        MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> {}
-                        else -> if (outputBufferIndex >= 0) {
+                // ---- Drain decoder output -> render -> encoder surface ----
+                var decoderOut = true
+                while (decoderOut) {
+                    val outIndex = decoder!!.dequeueOutputBuffer(bufferInfo, timeoutUs)
+                    when (outIndex) {
+                        MediaCodec.INFO_TRY_AGAIN_LATER -> decoderOut = false
+                        MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> Unit
+                        else -> if (outIndex >= 0) {
                             val doRender = shouldRenderDecodedToSurface(bufferInfo)
-                            decoder.releaseOutputBuffer(outputBufferIndex, doRender)
+                            decoder!!.releaseOutputBuffer(outIndex, doRender)
+
                             if (doRender) {
-                                eglHelper.drawVideoFrame()
-                                val ptsUs = monoPts.nextFrom(bufferInfo.presentationTimeUs) // <- decoder PTS
-                                eglHelper.setPresentationTime(ptsUs * 1000L)
-                                eglHelper.swapBuffers()
+                                if (firstDecoderPtsUs < 0) firstDecoderPtsUs = bufferInfo.presentationTimeUs
+                                val normPtsUs = maxOf(0L, bufferInfo.presentationTimeUs - firstDecoderPtsUs)
+                                val safePtsUs = ptsMono.nextFrom(normPtsUs)
+
+                                // ✅ NO OVERLAY HERE
+                                eglHelper!!.drawVideoFrame()
+                                eglHelper!!.setPresentationTime(safePtsUs * 1000L)
+                                eglHelper!!.swapBuffers()
                             }
-                            if (bufferInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) {
-                                encoder.signalEndOfInputStream()
-                                decoderOutputAvailable = false
+
+                            val eos = (bufferInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0
+                            if (eos && !signaledEncoderEOS) {
+                                encoder!!.signalEndOfInputStream()
+                                signaledEncoderEOS = true
+                                decoderOut = false
                             }
                         }
                     }
                 }
 
-                var encoderOutputAvailable = true
-                while (encoderOutputAvailable) {
-                    val outputBufferIndex = encoder.dequeueOutputBuffer(bufferInfo, timeoutUs)
-                    when (outputBufferIndex) {
+                // ---- Drain encoder output (non-blocking) ----
+                drainEncoderToMuxer(
+                    encoder = encoder!!,
+                    muxer = muxer!!,
+                    state = muxState,
+                    bufferInfo = bufferInfo,
+                    timeoutUs = 0L,
+                    untilEos = false
+                )
 
-                    MediaCodec.INFO_TRY_AGAIN_LATER -> encoderOutputAvailable = false
-                    else -> if (outputBufferIndex >= 0) {
-                        val encodedData = encoder.getOutputBuffer(outputBufferIndex)!!
-
-                        // ✅ Skip codec config
-                        if ((bufferInfo.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG) != 0) {
-                            encoder.releaseOutputBuffer(outputBufferIndex, false)
-                            continue
-                        }
-
-                        if (bufferInfo.size > 0) {
-                            // ✅ Always reset ByteBuffer range before writeSampleData
-                            encodedData.position(bufferInfo.offset)
-                            encodedData.limit(bufferInfo.offset + bufferInfo.size)
-                            muxer.writeSampleData(outputVideoTrackIndex, encodedData, bufferInfo)
-                        }
-
-                        encoder.releaseOutputBuffer(outputBufferIndex, false)
-                        if ((bufferInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0) {
-                            sawEncoderEOS = true
-                            encoderOutputAvailable = false
-                        }
-                    }
-                    }
-                }
+                // Once we signaled EOS to encoder, we can break and do a full EOS drain
+                if (signaledEncoderEOS) break
             }
+
+            // ---- Final: drain encoder until EOS ----
+            drainEncoderToMuxer(
+                encoder = encoder!!,
+                muxer = muxer!!,
+                state = muxState,
+                bufferInfo = bufferInfo,
+                timeoutUs = timeoutUs,
+                untilEos = true
+            )
+
+            // ---- Copy audio after muxer has started ----
+            if (muxState.started && outAudioTrackIndex != -1) {
+                copyTrack(
+                    srcPath = inputPath,
+                    mimePrefix = "audio/",
+                    muxer = muxer!!,
+                    outTrackIndex = outAudioTrackIndex,
+                    ptsOffsetUs = 0L,
+                    mono = MonotonicPts()
+                )
+            }
+
             return outputFile.absolutePath
-        } catch (e: Exception) {
-            Log.e("MediaKit", "Re-encoding failed", e)
-            throw e
         } finally {
-            extractor?.release()
-            decoder?.stop()
-            decoder?.release()
-            encoder?.stop()
-            encoder?.release()
-            muxer?.stop()
-            muxer?.release()
-            eglHelper?.release()
+            runCatching { videoExtractor?.release() }
+            runCatching { decoder?.stop(); decoder?.release() }
+            runCatching { encoder?.stop(); encoder?.release() }
+            if (muxState.started) runCatching { muxer?.stop() }
+            runCatching { muxer?.release() }
+            runCatching { eglHelper?.release() }
         }
     }
-
     // Extensions to handle missing keys in MediaFormat
     private fun MediaFormat.getIntegerOrDefault(key: String, keyName: String, defaultValue: Int = 0): Int {
         return if (containsKey(key)) {
@@ -681,6 +773,42 @@ class NitroMediaKit : HybridNitroMediaKitSpec() {
         } else {
             Log.w("HybridMediaKit", "$keyName is missing; defaulting to $defaultValue")
             defaultValue
+        }
+    }
+
+    private fun csdHash(format: MediaFormat, key: String): Pair<Int, Int> {
+        if (!format.containsKey(key)) return 0 to 0
+        val bb = format.getByteBuffer(key) ?: return 0 to 0
+        val dup = bb.duplicate()
+        dup.clear()
+        val bytes = ByteArray(dup.remaining())
+        dup.get(bytes)
+        return bytes.contentHashCode() to bytes.size
+    }
+
+    private fun videoSignature(path: String): String {
+        val ex = MediaExtractor()
+        try {
+            ex.setDataSource(path)
+            for (i in 0 until ex.trackCount) {
+                val f = ex.getTrackFormat(i)
+                val mime = f.getString(MediaFormat.KEY_MIME) ?: ""
+                if (!mime.startsWith("video/")) continue
+
+                val w = f.getInteger(MediaFormat.KEY_WIDTH)
+                val h = f.getInteger(MediaFormat.KEY_HEIGHT)
+                val fps = if (f.containsKey(MediaFormat.KEY_FRAME_RATE)) f.getInteger(MediaFormat.KEY_FRAME_RATE) else 30
+                val (h0, s0) = csdHash(f, "csd-0")
+                val (h1, s1) = csdHash(f, "csd-1")
+
+                val prof = if (f.containsKey(MediaFormat.KEY_PROFILE)) f.getInteger(MediaFormat.KEY_PROFILE) else -1
+                val lvl  = if (f.containsKey(MediaFormat.KEY_LEVEL)) f.getInteger(MediaFormat.KEY_LEVEL) else -1
+
+                return "$mime|${w}x$h@$fps|csd0=$h0:$s0|csd1=$h1:$s1|p=$prof|l=$lvl"
+            }
+            throw IllegalArgumentException("No video track found in $path")
+        } finally {
+            ex.release()
         }
     }
 
@@ -730,42 +858,40 @@ class NitroMediaKit : HybridNitroMediaKitSpec() {
     data class VideoProperties(val width: Int, val height: Int, val frameRate: Float)
 
     private fun calculateWatermarkPosition(
-    position: String,
-    watermarkBitmap: Bitmap,
-    videoWidth: Int,
-    videoHeight: Int
-): Pair<Float, Float> {
+        position: String,
+        watermarkBitmap: Bitmap,
+        videoWidth: Int,
+        videoHeight: Int
+    ): Pair<Float, Float> {
+        var posX = 0f   // give them a default so they’re always initialised
+        var posY = 0f
 
-    var posX = 0f   // give them a default so they’re always initialised
-    var posY = 0f
+        when (position.lowercase()) {
+            "top-left" -> {
+                posX = 0f
+                posY = (videoHeight - watermarkBitmap.height).toFloat()
+            }
+            "top-right" -> {
+                posX = (videoWidth  - watermarkBitmap.width ).toFloat()
+                posY = (videoHeight - watermarkBitmap.height).toFloat()
+            }
+            "bottom-left" -> {
+                posX = 0f
+                posY = 0f
+            }
+            "bottom-right" -> {
+                posX = (videoWidth  - watermarkBitmap.width ).toFloat()
+                posY = 0f
+            }
+            else -> {
+                // centre by default
+                posX = ((videoWidth  - watermarkBitmap.width )  / 2f)
+                posY = ((videoHeight - watermarkBitmap.height) / 2f)
+            }
+        }
 
-    when (position.lowercase()) {
-        "top-left" -> {
-            posX = 0f
-            posY = (videoHeight - watermarkBitmap.height).toFloat()
-        }
-        "top-right" -> {
-            posX = (videoWidth  - watermarkBitmap.width ).toFloat()
-            posY = (videoHeight - watermarkBitmap.height).toFloat()
-        }
-        "bottom-left" -> {
-            posX = 0f
-            posY = 0f
-        }
-        "bottom-right" -> {
-            posX = (videoWidth  - watermarkBitmap.width ).toFloat()
-            posY = 0f
-        }
-        else -> {
-            // centre by default
-            posX = ((videoWidth  - watermarkBitmap.width )  / 2f)
-            posY = ((videoHeight - watermarkBitmap.height) / 2f)
-        }
+        return Pair(posX, posY)
     }
-
-    return Pair(posX, posY)
-}
-
 
     private fun adjustBitmapToSupportedSize(
         bitmap: Bitmap,
@@ -842,11 +968,17 @@ class NitroMediaKit : HybridNitroMediaKitSpec() {
             if (trackIndex == -1 || format == null) return 0L
 
             extractor.selectTrack(trackIndex)
-            extractor.seekTo(0, MediaExtractor.SEEK_TO_CLOSEST_SYNC)
 
-            // Safer than fixed 1MB. Many files have KEY_MAX_INPUT_SIZE; otherwise pick a bigger fallback.
-            val cap = if (format.containsKey(MediaFormat.KEY_MAX_INPUT_SIZE))
-                maxOf(format.getInteger(MediaFormat.KEY_MAX_INPUT_SIZE), 2 * 1024 * 1024)
+            // For VIDEO: make sure we start on a sync sample (prevents black flashes at joins)
+            extractor.seekTo(0, MediaExtractor.SEEK_TO_CLOSEST_SYNC)
+            if (mimePrefix == "video/") {
+                while ((extractor.sampleFlags and MediaExtractor.SAMPLE_FLAG_SYNC) == 0) {
+                    if (!extractor.advance()) return 0L
+                }
+            }
+
+            val cap = if (format!!.containsKey(MediaFormat.KEY_MAX_INPUT_SIZE))
+                maxOf(format!!.getInteger(MediaFormat.KEY_MAX_INPUT_SIZE), 2 * 1024 * 1024)
             else
                 4 * 1024 * 1024
 
