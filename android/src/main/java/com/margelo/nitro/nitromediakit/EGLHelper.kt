@@ -345,8 +345,13 @@ class EglHelper {
     }
 
     fun swapBuffers() {
-        glFinish() // ensure all writes hit the surface before swap
-        EGL14.eglSwapBuffers(eglDisplay, eglSurface)
+    // glFinish() can stall the pipeline hard and cause missed frames on some devices.
+        glFlush()
+        val ok = EGL14.eglSwapBuffers(eglDisplay, eglSurface)
+        if (!ok) {
+            val err = EGL14.eglGetError()
+            Log.e("HybridMediaKit", "eglSwapBuffers failed: 0x${Integer.toHexString(err)}")
+        }
     }
 
     fun release() {
