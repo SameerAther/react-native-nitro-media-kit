@@ -19,9 +19,9 @@ export default function App() {
   const handleMergeVideos = async () => {
     try {
       const video = await NitroMediaKit.mergeVideos([
-        'https://www.sample-videos.com/video321/mp4/720/big_buck_bunny_720p_1mb.mp4',
-        'https://www.sample-videos.com/video321/mp4/720/big_buck_bunny_720p_2mb.mp4',
-        'https://www.sample-videos.com/video321/mp4/720/big_buck_bunny_720p_2mb.mp4',
+        'https://www.pexels.com/download/video/4114797/?fps=25.0&h=240&w=426',
+        'https://www.pexels.com/download/video/4114797/?fps=25.0&h=240&w=426',
+        'https://www.pexels.com/download/video/4114797/?fps=25.0&h=240&w=426',
       ]);
       Alert.alert('Merged Video Created', `Saved at: ${video}`);
       console.log('Merged video saved at:', video);
@@ -33,7 +33,7 @@ export default function App() {
   const handleWatermark = async () => {
     try {
       const video = await NitroMediaKit.watermarkVideo(
-        'https://www.sample-videos.com/video321/mp4/720/big_buck_bunny_720p_2mb.mp4',
+        'https://www.pexels.com/download/video/4114797/?fps=25.0&h=240&w=426',
         'Sameer Ather',
         'bottom-right'
       );
