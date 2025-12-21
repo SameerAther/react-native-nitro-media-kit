@@ -228,44 +228,65 @@ class NitroMediaKit: HybridNitroMediaKitSpec {
         return outputURL.path
     }
 }
+  
+  private var isSimulator: Bool {
+#if targetEnvironment(simulator)
+    return true
+#else
+    return false
+#endif
+  }
 
   public func watermarkVideo(video: String, watermark: String, position: String) -> Promise<String> {
     return Promise.async {
-      // Get the local file path, downloading if necessary
-      let localVideoPath = try await self.getLocalFilePath(video)
-      let videoURL = URL(fileURLWithPath: localVideoPath)
+      let localVideoPath = try await self.getLocalFilePath(video, defaultExtension: "mp4")
       
-      let asset = AVAsset(url: videoURL)
+      // Simulator + CoreAnimationTool watermark is notoriously crashy (xpc_api_misuse + -12900).
+      // Bypass on Simulator so development doesn't get nuked.
+      if self.isSimulator {
+        let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
+        let out = docs.appendingPathComponent("watermarked_SIM_\(Int(Date().timeIntervalSince1970)).mp4")
+        if FileManager.default.fileExists(atPath: out.path) { try FileManager.default.removeItem(at: out) }
+        try FileManager.default.copyItem(at: URL(fileURLWithPath: localVideoPath), to: out)
+        return out.path
+      }
+      
+      // ---- Your existing CoreAnimationTool export code (device only) ----
+      let asset = AVAsset(url: URL(fileURLWithPath: localVideoPath))
       let duration = try await asset.load(.duration)
       guard duration > .zero else {
         throw NSError(domain: "HybridMediaKit", code: -1, userInfo: [NSLocalizedDescriptionKey: "Video duration is zero"])
       }
       
-      // Create a composition
+      guard let assetVideoTrack = try await asset.loadTracks(withMediaType: .video).first else {
+        throw NSError(domain: "HybridMediaKit", code: -1, userInfo: [NSLocalizedDescriptionKey: "No video track found"])
+      }
+      
       let composition = AVMutableComposition()
-      guard let videoTrack = try await asset.loadTracks(withMediaType: .video).first else {
-        throw NSError(domain: "HybridMediaKit", code: -1, userInfo: [NSLocalizedDescriptionKey: "No video track found in asset"])
+      guard let compositionVideoTrack = composition.addMutableTrack(withMediaType: .video, preferredTrackID: kCMPersistentTrackID_Invalid) else {
+        throw NSError(domain: "HybridMediaKit", code: -1, userInfo: [NSLocalizedDescriptionKey: "Cannot create composition video track"])
       }
       
       let timeRange = CMTimeRange(start: .zero, duration: duration)
+      try compositionVideoTrack.insertTimeRange(timeRange, of: assetVideoTrack, at: .zero)
       
-      guard let compositionVideoTrack = composition.addMutableTrack(
-        withMediaType: .video,
-        preferredTrackID: kCMPersistentTrackID_Invalid
-      ) else {
-        throw NSError(domain: "HybridMediaKit", code: -1, userInfo: [NSLocalizedDescriptionKey: "Cannot create video track in composition"])
+      let preferredTransform = try await assetVideoTrack.load(.preferredTransform)
+      let naturalSize = try await assetVideoTrack.load(.naturalSize)
+      
+      // Compute the displayed rect after rotation/transform
+      let transformedRect = CGRect(origin: .zero, size: naturalSize).applying(preferredTransform)
+      
+      func evenInt(_ v: CGFloat) -> Int {
+        let r = max(2, Int(round(abs(v))))
+        return r - (r % 2)
       }
       
-      try compositionVideoTrack.insertTimeRange(timeRange, of: videoTrack, at: .zero)
+      let renderW = evenInt(transformedRect.size.width)
+      let renderH = evenInt(transformedRect.size.height)
+      let renderSize = CGSize(width: renderW, height: renderH)
       
-      // Preserve the original transformation
-      let transform = try await videoTrack.load(.preferredTransform)
-      compositionVideoTrack.preferredTransform = transform
-      
-      // Create a video composition
       let videoComposition = AVMutableVideoComposition()
-      let naturalSize = try await videoTrack.load(.naturalSize)
-      videoComposition.renderSize = naturalSize
+      videoComposition.renderSize = renderSize
       videoComposition.frameDuration = CMTime(value: 1, timescale: 30)
       
       // Instruction
@@ -273,83 +294,89 @@ class NitroMediaKit: HybridNitroMediaKitSpec {
       instruction.timeRange = timeRange
       
       let layerInstruction = AVMutableVideoCompositionLayerInstruction(assetTrack: compositionVideoTrack)
+      
+      // Apply the preferredTransform AND fix negative-origin translations so it lands inside renderSize
+      var fixedTransform = preferredTransform
+      
+      // When rotated, the transformed rect often has negative origin.
+      // Translate it back into the visible render box.
+      let tx = -transformedRect.origin.x
+      let ty = -transformedRect.origin.y
+      fixedTransform = fixedTransform.concatenating(CGAffineTransform(translationX: tx, y: ty))
+      
+      layerInstruction.setTransform(fixedTransform, at: .zero)
+      
       instruction.layerInstructions = [layerInstruction]
       videoComposition.instructions = [instruction]
       
-      // Create the watermark layer
-      let overlayLayer = CATextLayer()
-      overlayLayer.string = watermark
-      overlayLayer.font = UIFont.systemFont(ofSize: 64, weight: .bold)
-      overlayLayer.fontSize = 64
-      overlayLayer.alignmentMode = .left
-      overlayLayer.contentsScale = await MainActor.run { UIScreen.main.scale }
-      overlayLayer.foregroundColor = UIColor.white.cgColor
-      
-      // Calculate text size
-      let textSize = (watermark as NSString).size(withAttributes: [.font: UIFont.systemFont(ofSize: 64, weight: .bold)])
-      
-      // Define padding
-      let padding: CGFloat = 50
-      
-      // Calculate displayed size based on the transform
-      let displayedSize: CGSize
-      if transform.a == 1 && transform.d == 1 { // 0 degrees
-        displayedSize = naturalSize
-      } else if transform.a == 0 && transform.b == -1 && transform.c == 1 && transform.d == 0 { // 90 degrees clockwise
-        displayedSize = CGSize(width: naturalSize.height, height: naturalSize.width)
-      } else if transform.a == -1 && transform.d == -1 { // 180 degrees
-        displayedSize = naturalSize
-      } else if transform.a == 0 && transform.b == 1 && transform.c == -1 && transform.d == 0 { // 270 degrees clockwise
-        displayedSize = CGSize(width: naturalSize.height, height: naturalSize.width)
-      } else {
-        displayedSize = naturalSize // Fallback
+      // ---- CoreAnimationTool layers (do NOT flip geometry) ----
+      let (parentLayer, videoLayer) = await MainActor.run { () -> (CALayer, CALayer) in
+        let parent = CALayer()
+        parent.frame = CGRect(origin: .zero, size: renderSize)
+        parent.isGeometryFlipped = false   // ✅ keep default coordinate system
+        
+        let videoL = CALayer()
+        videoL.frame = parent.bounds
+        parent.addSublayer(videoL)
+        
+        // Watermark layer
+        let overlay = CATextLayer()
+        overlay.contentsScale = UIScreen.main.scale
+        overlay.alignmentMode = .left
+        overlay.foregroundColor = UIColor.white.cgColor
+        
+        let fontSize: CGFloat = 64
+        overlay.fontSize = fontSize
+        overlay.font = CTFontCreateWithName("Helvetica-Bold" as CFString, fontSize, nil)
+        overlay.string = watermark
+        
+        let uiFont = UIFont.systemFont(ofSize: fontSize, weight: .bold)
+        let textSize = (watermark as NSString).size(withAttributes: [.font: uiFont])
+        
+        let padding: CGFloat = 50
+        let x: CGFloat
+        let y: CGFloat
+        
+        // In default CoreAnimation coords: origin is bottom-left for our purposes.
+        switch position.lowercased() {
+          case "top-left":
+            x = padding
+            y = renderSize.height - textSize.height - padding
+          case "top-right":
+            x = renderSize.width - textSize.width - padding
+            y = renderSize.height - textSize.height - padding
+          case "bottom-right":
+            x = renderSize.width - textSize.width - padding
+            y = padding
+          case "bottom-left":
+            x = padding
+            y = padding
+          default:
+            x = padding
+            y = padding
+        }
+        
+        let clampedX = max(0, min(x, renderSize.width - textSize.width))
+        let clampedY = max(0, min(y, renderSize.height - textSize.height))
+        
+        overlay.frame = CGRect(x: clampedX, y: clampedY, width: textSize.width, height: textSize.height)
+        
+        // Optional: make it unmistakable during debugging
+        // overlay.backgroundColor = UIColor.black.withAlphaComponent(0.35).cgColor
+        
+        parent.addSublayer(overlay)
+        
+        return (parent, videoL)
       }
       
-      // Calculate desired position in displayed coordinate system
-      let displayedPoint: CGPoint
-      switch position.lowercased() {
-        case "top-left":
-          displayedPoint = CGPoint(x: padding, y: displayedSize.height - textSize.height - padding)
-        case "top-right":
-          displayedPoint = CGPoint(x: displayedSize.width - textSize.width - padding, y: displayedSize.height - textSize.height - padding)
-        case "bottom-right":
-          displayedPoint = CGPoint(x: displayedSize.width - textSize.width - padding, y: padding)
-        case "bottom-left":
-          displayedPoint = CGPoint(x: padding, y: padding)
-        default:
-          displayedPoint = CGPoint(x: padding, y: padding)
-      }
-      
-      // Map to natural coordinate system using inverse transform
-      let inverseTransform = transform.inverted()
-      let naturalPoint = displayedPoint.applying(inverseTransform)
-      
-      // Set the watermark layer’s frame
-      overlayLayer.frame = CGRect(x: naturalPoint.x, y: naturalPoint.y, width: textSize.width, height: textSize.height)
-      
-      // Create parent and video layers
-      let parentLayer = CALayer()
-      let videoLayer = CALayer()
-      
-      parentLayer.frame = CGRect(x: 0, y: 0, width: naturalSize.width, height: naturalSize.height)
-      videoLayer.frame = parentLayer.bounds
-      
-      parentLayer.addSublayer(videoLayer)
-      parentLayer.addSublayer(overlayLayer)
-      
-      // Set up the animation tool
       videoComposition.animationTool = AVVideoCompositionCoreAnimationTool(
         postProcessingAsVideoLayer: videoLayer,
         in: parentLayer
       )
       
-      // Export the video
-      let documentsDirectory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
-      let outputURL = documentsDirectory.appendingPathComponent("watermarked_video_\(Int(Date().timeIntervalSince1970)).mp4")
-      
-      if FileManager.default.fileExists(atPath: outputURL.path) {
-        try FileManager.default.removeItem(at: outputURL)
-      }
+      let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
+      let outputURL = docs.appendingPathComponent("watermarked_video_\(Int(Date().timeIntervalSince1970)).mp4")
+      if FileManager.default.fileExists(atPath: outputURL.path) { try FileManager.default.removeItem(at: outputURL) }
       
       guard let exporter = AVAssetExportSession(asset: composition, presetName: AVAssetExportPresetHighestQuality) else {
         throw NSError(domain: "HybridMediaKit", code: -1, userInfo: [NSLocalizedDescriptionKey: "Cannot create AVAssetExportSession"])
@@ -360,21 +387,15 @@ class NitroMediaKit: HybridNitroMediaKitSpec {
       exporter.outputFileType = .mp4
       exporter.shouldOptimizeForNetworkUse = true
       
-      try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+      try await withCheckedThrowingContinuation { (c: CheckedContinuation<Void, Error>) in
         exporter.exportAsynchronously {
           switch exporter.status {
             case .completed:
-              continuation.resume()
+              c.resume()
             case .failed:
-              if let error = exporter.error {
-                continuation.resume(throwing: error)
-              } else {
-                let error = NSError(domain: "HybridMediaKit", code: -1, userInfo: [NSLocalizedDescriptionKey: "Unknown export error"])
-                continuation.resume(throwing: error)
-              }
+              c.resume(throwing: exporter.error ?? NSError(domain: "HybridMediaKit", code: -1, userInfo: [NSLocalizedDescriptionKey: "Unknown export error"]))
             case .cancelled:
-              let error = NSError(domain: "HybridMediaKit", code: -1, userInfo: [NSLocalizedDescriptionKey: "Export cancelled"])
-              continuation.resume(throwing: error)
+              c.resume(throwing: NSError(domain: "HybridMediaKit", code: -1, userInfo: [NSLocalizedDescriptionKey: "Export cancelled"]))
             default:
               break
           }
@@ -388,85 +409,97 @@ class NitroMediaKit: HybridNitroMediaKitSpec {
 
 
     // Helper function to determine if the path is a remote URL and download if necessary
-    private func getLocalFilePath(_ pathOrUrl: String) async throws -> String {
+  private func getLocalFilePath(_ pathOrUrl: String, defaultExtension: String? = nil) async throws -> String {
     if let url = URL(string: pathOrUrl), url.scheme == "http" || url.scheme == "https" {
-        // Download the file asynchronously
-        let (data, response) = try await URLSession.shared.data(from: url)
-        
-        // Check for HTTP errors
-        if let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode != 200 {
-            throw NSError(domain: "HybridMediaKit", code: httpResponse.statusCode, userInfo: [NSLocalizedDescriptionKey: "Failed to download file: HTTP \(httpResponse.statusCode)"])
-        }
-        
-        // Save the data to a temporary file
-        let tempDir = NSTemporaryDirectory()
-        let tempFilePath = URL(fileURLWithPath: tempDir).appendingPathComponent(UUID().uuidString + ".mp4")
-        try data.write(to: tempFilePath)
-        
-        // Log file size
-        let fileSize = try FileManager.default.attributesOfItem(atPath: tempFilePath.path)[.size] as? Int64 ?? 0
-        print("Downloaded file size: \(fileSize) bytes at path: \(tempFilePath.path)")
-        
-        return tempFilePath.path
-    } else {
-        // It's a local file path
-        // Verify the file exists
-        if !FileManager.default.fileExists(atPath: pathOrUrl) {
-            throw NSError(domain: "HybridMediaKit", code: -1, userInfo: [NSLocalizedDescriptionKey: "File does not exist at path: \(pathOrUrl)"])
-        }
-        return pathOrUrl
+      let (data, response) = try await URLSession.shared.data(from: url)
+      
+      if let http = response as? HTTPURLResponse, http.statusCode != 200 {
+        throw NSError(domain: "HybridMediaKit", code: http.statusCode,
+                      userInfo: [NSLocalizedDescriptionKey: "Failed to download file: HTTP \(http.statusCode)"])
+      }
+      
+      let mime = (response as? HTTPURLResponse)?
+        .value(forHTTPHeaderField: "Content-Type")?
+        .lowercased() ?? ""
+      
+      func extFromMime(_ mime: String) -> String? {
+        if mime.contains("video/") { return "mp4" }
+        if mime.contains("image/png") { return "png" }
+        if mime.contains("image/jpeg") { return "jpg" }
+        if mime.contains("image/jpg") { return "jpg" }
+        if mime.contains("image/") { return "png" }
+        return nil
+      }
+      
+      let ext: String = {
+        if !url.pathExtension.isEmpty { return url.pathExtension }
+        if let e = extFromMime(mime) { return e }
+        if let e = defaultExtension { return e }
+        return "bin"
+      }()
+      
+      let tempFileURL = URL(fileURLWithPath: NSTemporaryDirectory())
+        .appendingPathComponent(UUID().uuidString)
+        .appendingPathExtension(ext)
+      
+      try data.write(to: tempFileURL)
+      return tempFileURL.path
     }
-}
+    
+    if !FileManager.default.fileExists(atPath: pathOrUrl) {
+      throw NSError(domain: "HybridMediaKit", code: -1,
+                    userInfo: [NSLocalizedDescriptionKey: "File does not exist at path: \(pathOrUrl)"])
+    }
+    return pathOrUrl
+  }
+
 
     // Helper function to write frames asynchronously
-    private func writeFrames(
-        adaptor: AVAssetWriterInputPixelBufferAdaptor,
-        writerInput: AVAssetWriterInput,
-        pixelBuffer: CVPixelBuffer,
-        frameDuration: CMTime,
-        totalFrames: Int,
-        writer: AVAssetWriter
-    ) async throws {
-        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-            var frameCount = 0
-            writerInput.requestMediaDataWhenReady(on: DispatchQueue.global(qos: .background)) {
-                while writerInput.isReadyForMoreMediaData && frameCount < totalFrames {
-                    let presentationTime = CMTimeMultiply(frameDuration, multiplier: Int32(frameCount))
-
-                    if !adaptor.append(pixelBuffer, withPresentationTime: presentationTime) {
-                        writerInput.markAsFinished()
-                        writer.cancelWriting()
-                        continuation.resume(throwing: writer.error ?? NSError(
-                            domain: "HybridMediaKit",
-                            code: -1,
-                            userInfo: [NSLocalizedDescriptionKey: "Failed to append pixel buffer"]
-                        ))
-                        return
-                    }
-
-                    frameCount += 1
-                }
-
-                if frameCount >= totalFrames {
-                    writerInput.markAsFinished()
-                    writer.finishWriting {
-                        if writer.status == .completed {
-                            continuation.resume()
-                        } else if let error = writer.error {
-                            continuation.resume(throwing: error)
-                        } else {
-                            continuation.resume(throwing: NSError(
-                                domain: "HybridMediaKit",
-                                code: -1,
-                                userInfo: [NSLocalizedDescriptionKey: "Unknown error during finishWriting"]
-                            ))
-                        }
-                    }
-                }
-            }
+  private func writeFrames(
+    adaptor: AVAssetWriterInputPixelBufferAdaptor,
+    writerInput: AVAssetWriterInput,
+    pixelBuffer: CVPixelBuffer,
+    frameDuration: CMTime,
+    totalFrames: Int,
+    writer: AVAssetWriter
+  ) async throws {
+    let queue = DispatchQueue(label: "NitroMediaKit.ImageToVideo.Writer")
+    
+    try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+      var frameCount = 0
+      var didFinish = false
+      
+      writerInput.requestMediaDataWhenReady(on: queue) {
+        if didFinish { return }
+        
+        while writerInput.isReadyForMoreMediaData && frameCount < totalFrames {
+          let pts = CMTimeMultiply(frameDuration, multiplier: Int32(frameCount))
+          guard adaptor.append(pixelBuffer, withPresentationTime: pts) else {
+            didFinish = true
+            writerInput.markAsFinished()
+            writer.cancelWriting()
+            continuation.resume(throwing: writer.error ?? NSError(domain: "HybridMediaKit", code: -1,
+                                                                  userInfo: [NSLocalizedDescriptionKey: "Failed to append pixel buffer"]))
+            return
+          }
+          frameCount += 1
         }
+        
+        if frameCount >= totalFrames && !didFinish {
+          didFinish = true
+          writerInput.markAsFinished()
+          writer.finishWriting {
+            if writer.status == .completed {
+              continuation.resume()
+            } else {
+              continuation.resume(throwing: writer.error ?? NSError(domain: "HybridMediaKit", code: -1,
+                                                                    userInfo: [NSLocalizedDescriptionKey: "Unknown error during finishWriting"]))
+            }
+          }
+        }
+      }
     }
-
+  }
 
     // Helper function to create a pixel buffer from a UIImage
     private func createPixelBuffer(from image: UIImage, pixelBufferPool: CVPixelBufferPool, width: Int, height: Int) -> CVPixelBuffer? {
