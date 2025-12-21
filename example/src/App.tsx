@@ -1,10 +1,14 @@
 import { View, StyleSheet, Alert, Button } from 'react-native';
-import { NitroMediaKit } from 'react-native-nitro-media-kit';
+import {
+  convertImageToVideo,
+  mergeVideos,
+  watermarkVideo,
+} from 'react-native-nitro-media-kit';
 
 export default function App() {
   const handleConvertImageToVideo = async () => {
     try {
-      const video = await NitroMediaKit.convertImageToVideo(
+      const video = await convertImageToVideo(
         'https://unsplash.com/photos/b9-odQi5oDo/download?ixid=M3wxMjA3fDB8MXxzZWFyY2h8Mnx8dXJsfGVufDB8fHx8MTczMjM0MTM2NXww&force=true&w=1920',
         5
       );
@@ -18,7 +22,7 @@ export default function App() {
 
   const handleMergeVideos = async () => {
     try {
-      const video = await NitroMediaKit.mergeVideos([
+      const video = await mergeVideos([
         'https://www.pexels.com/download/video/4114797/?fps=25.0&h=240&w=426',
         'https://www.pexels.com/download/video/4114797/?fps=25.0&h=240&w=426',
         'https://www.pexels.com/download/video/4114797/?fps=25.0&h=240&w=426',
@@ -32,7 +36,7 @@ export default function App() {
 
   const handleWatermark = async () => {
     try {
-      const video = await NitroMediaKit.watermarkVideo(
+      const video = await watermarkVideo(
         'https://www.pexels.com/download/video/4114797/?fps=25.0&h=240&w=426',
         'Sameer Ather',
         'bottom-right'
