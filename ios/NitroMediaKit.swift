@@ -345,6 +345,9 @@ class NitroMediaKit: HybridNitroMediaKitSpec {
           case "top-right":
             x = renderSize.width - textSize.width - padding
             y = renderSize.height - textSize.height - padding
+          case "center":
+            x = (renderSize.width - textSize.width) / 2
+            y = (renderSize.height - textSize.height) / 2
           case "bottom-right":
             x = renderSize.width - textSize.width - padding
             y = padding
