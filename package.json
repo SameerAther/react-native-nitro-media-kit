@@ -1,7 +1,7 @@
 {
   "name": "react-native-nitro-media-kit",
   "version": "0.2.0",
-  "description": "Media Kit Library",
+  "description": "A native-powered React Native media toolkit for fast image and video processing, including conversion, merging, and watermarking.",
   "main": "./lib/module/index.js",
   "types": "./lib/typescript/src/index.d.ts",
   "exports": {
