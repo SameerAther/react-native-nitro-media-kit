@@ -27,11 +27,6 @@ export default function App() {
 
   const handleMergeVideos = async () => {
     try {
-      console.log(
-        getMediaInfo(
-          'https://www.pexels.com/download/video/4114797/?fps=25.0&h=240&w=426'
-        )
-      );
       const result = await mergeVideos([
         'https://www.pexels.com/download/video/4114797/?fps=25.0&h=240&w=426',
         'https://www.pexels.com/download/video/4114797/?fps=25.0&h=240&w=426',

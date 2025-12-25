@@ -46,10 +46,11 @@ export type MediaInfoResult = {
   error?: MediaInfoError;
 };
 
-export interface NitroMediaKit extends HybridObject<{
-  ios: 'swift';
-  android: 'kotlin';
-}> {
+export interface NitroMediaKit
+  extends HybridObject<{
+    ios: 'swift';
+    android: 'kotlin';
+  }> {
   getMediaInfo(inputUri: string): Promise<MediaInfoResult>;
   convertImageToVideo(
     image: string,
