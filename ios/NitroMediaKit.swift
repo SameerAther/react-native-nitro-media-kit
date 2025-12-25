@@ -4,6 +4,18 @@ import UIKit
 import NitroModules // Import Promise from NitroModules core
 
 class NitroMediaKit: HybridNitroMediaKitSpec {
+    private func resolveFps(for track: AVAssetTrack) -> Double? {
+        let nominal = Double(track.nominalFrameRate)
+        if nominal > 0 {
+            return nominal
+        }
+        let minFrameDuration = track.minFrameDuration
+        if minFrameDuration.isNumeric && minFrameDuration.seconds > 0 {
+            return 1.0 / minFrameDuration.seconds
+        }
+        return nil
+    }
+
     private func buildMediaInfo(
         durationMs: Double? = nil,
         width: Double? = nil,
@@ -119,23 +131,31 @@ class NitroMediaKit: HybridNitroMediaKitSpec {
                 let audioTracks = try await asset.loadTracks(withMediaType: .audio)
 
                 let primaryVideoTrack = videoTracks.first
-                let naturalSize = try await primaryVideoTrack?.load(.naturalSize)
-                let preferredTransform = try await primaryVideoTrack?.load(.preferredTransform)
-
-                var width: Int?
-                var height: Int?
-                if let naturalSize = naturalSize, let preferredTransform = preferredTransform {
+                var width: Double?
+                var height: Double?
+                var fps: Double?
+                if let primaryVideoTrack = primaryVideoTrack {
+                    let naturalSize = try await primaryVideoTrack.load(.naturalSize)
+                    let preferredTransform = try await primaryVideoTrack.load(.preferredTransform)
                     let transformedRect = CGRect(origin: .zero, size: naturalSize).applying(preferredTransform)
-                    width = Int(round(abs(transformedRect.size.width)))
-                    height = Int(round(abs(transformedRect.size.height)))
+                    let transformedWidth = abs(transformedRect.size.width)
+                    let transformedHeight = abs(transformedRect.size.height)
+                    let naturalWidth = abs(naturalSize.width)
+                    let naturalHeight = abs(naturalSize.height)
+                    if transformedWidth > 0 && transformedHeight > 0 {
+                        width = Double(transformedWidth)
+                        height = Double(transformedHeight)
+                    } else if naturalWidth > 0 && naturalHeight > 0 {
+                        width = Double(naturalWidth)
+                        height = Double(naturalHeight)
+                    }
+                    fps = self.resolveFps(for: primaryVideoTrack) ?? 30
                 }
-
-                let fps = primaryVideoTrack?.nominalFrameRate
                 let media = self.buildMediaInfo(
                     durationMs: duration.seconds.isFinite ? duration.seconds * 1000.0 : nil,
-                    width: width.map { Double($0) },
-                    height: height.map { Double($0) },
-                    fps: fps.map { Double($0) },
+                    width: width,
+                    height: height,
+                    fps: fps,
                     format: ext.isEmpty ? nil : ext,
                     sizeBytes: sizeBytes,
                     audioTracks: Double(audioTracks.count),
@@ -276,6 +296,9 @@ class NitroMediaKit: HybridNitroMediaKitSpec {
     return Promise.async {
         var result: MediaInfoResult
         var localVideoPaths = [String]()
+        var mergeWidth: Double? = nil
+        var mergeHeight: Double? = nil
+        var mergeFps: Double? = nil
         do {
             for videoPathOrUrl in videos {
                 let localPath = try await self.getLocalFilePath(videoPathOrUrl)
@@ -327,6 +350,24 @@ class NitroMediaKit: HybridNitroMediaKitSpec {
                 
                 // Insert video track
                 if let assetVideoTrack = asset.tracks(withMediaType: .video).first {
+                    if mergeWidth == nil || mergeHeight == nil || mergeFps == nil {
+                        let naturalSize = try await assetVideoTrack.load(.naturalSize)
+                        let preferredTransform = try await assetVideoTrack.load(.preferredTransform)
+                        let transformedRect = CGRect(origin: .zero, size: naturalSize).applying(preferredTransform)
+                        let transformedWidth = abs(transformedRect.size.width)
+                        let transformedHeight = abs(transformedRect.size.height)
+                        let naturalWidth = abs(naturalSize.width)
+                        let naturalHeight = abs(naturalSize.height)
+                        if mergeWidth == nil {
+                            mergeWidth = Double(transformedWidth > 0 ? transformedWidth : naturalWidth)
+                        }
+                        if mergeHeight == nil {
+                            mergeHeight = Double(transformedHeight > 0 ? transformedHeight : naturalHeight)
+                        }
+                        if mergeFps == nil {
+                            mergeFps = self.resolveFps(for: assetVideoTrack) ?? 30
+                        }
+                    }
                     try compositionVideoTrack.insertTimeRange(
                         timeRange,
                         of: assetVideoTrack,
@@ -414,6 +455,9 @@ class NitroMediaKit: HybridNitroMediaKitSpec {
         let outputPath = outputURL.path
         let media = self.buildMediaInfo(
             durationMs: currentTime.seconds.isFinite ? currentTime.seconds * 1000.0 : nil,
+            width: mergeWidth,
+            height: mergeHeight,
+            fps: mergeFps,
             format: "mp4",
             sizeBytes: self.fileSizeBytes(atPath: outputPath),
             audioTracks: compositionAudioTrack == nil ? 0 : 1,

@@ -244,24 +244,34 @@ class NitroMediaKit : HybridNitroMediaKitSpec() {
 
                 retriever = MediaMetadataRetriever().apply { setDataSource(localPath) }
                 val durationMs = retriever?.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toDoubleOrNull()
-                val width = retriever?.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toDoubleOrNull()
-                val height = retriever?.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toDoubleOrNull()
+                var width = retriever?.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toDoubleOrNull()
+                var height = retriever?.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toDoubleOrNull()
+                val captureFps = retriever?.extractMetadata(MediaMetadataRetriever.METADATA_KEY_CAPTURE_FRAMERATE)?.toDoubleOrNull()
 
                 extractor = MediaExtractor().apply { setDataSource(localPath) }
                 var videoTracks = 0
                 var audioTracks = 0
-                var fps: Double? = null
+                var fps: Double? = captureFps
                 for (i in 0 until extractor!!.trackCount) {
                     val format = extractor!!.getTrackFormat(i)
                     val mime = format.getString(MediaFormat.KEY_MIME) ?: ""
                     if (mime.startsWith("video/")) {
                         videoTracks++
+                        if (width == null && format.containsKey(MediaFormat.KEY_WIDTH)) {
+                            width = format.getInteger(MediaFormat.KEY_WIDTH).toDouble()
+                        }
+                        if (height == null && format.containsKey(MediaFormat.KEY_HEIGHT)) {
+                            height = format.getInteger(MediaFormat.KEY_HEIGHT).toDouble()
+                        }
                         if (fps == null && format.containsKey(MediaFormat.KEY_FRAME_RATE)) {
                             fps = format.getInteger(MediaFormat.KEY_FRAME_RATE).toDouble()
                         }
                     } else if (mime.startsWith("audio/")) {
                         audioTracks++
                     }
+                }
+                if (videoTracks > 0 && fps == null) {
+                    fps = 30.0
                 }
 
                 val media = buildMediaInfo(
@@ -522,6 +532,9 @@ class NitroMediaKit : HybridNitroMediaKitSpec() {
                 val outputPath = videoFile.absolutePath
                 val media = buildMediaInfo(
                     durationMs = if (timelineUs > 0) timelineUs / 1000.0 else null,
+                    width = targetProps.width.toDouble(),
+                    height = targetProps.height.toDouble(),
+                    fps = targetProps.frameRate.toDouble(),
                     format = "mp4",
                     sizeBytes = File(outputPath).length().toDouble(),
                     audioTracks = if (outputAudioTrackIndex != -1) 1.0 else 0.0,
