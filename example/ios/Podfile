@@ -1,13 +1,13 @@
 ENV['RCT_NEW_ARCH_ENABLED'] = '1'
 
+# Resolve react_native_pods.rb with node to allow for hoisting
 require Pod::Executable.execute_command('node', ['-p',
   'require.resolve(
     "react-native/scripts/react_native_pods.rb",
     {paths: [process.argv[1]]},
   )', __dir__]).strip
 
-platform :ios, '16.0'
-
+platform :ios, min_ios_version_supported
 prepare_react_native_project!
 
 linkage = ENV['USE_FRAMEWORKS']
@@ -21,6 +21,7 @@ target 'NitroMediaKitExample' do
 
   use_react_native!(
     :path => config[:reactNativePath],
+    # An absolute path to your application root.
     :app_path => "#{Pod::Config.instance.installation_root}/.."
   )
 
@@ -28,13 +29,8 @@ target 'NitroMediaKitExample' do
     react_native_post_install(
       installer,
       config[:reactNativePath],
-      :mac_catalyst_enabled => false
+      :mac_catalyst_enabled => false,
+      # :ccache_enabled => true
     )
-
-    installer.pods_project.targets.each do |t|
-      t.build_configurations.each do |bc|
-        bc.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '16.0'
-      end
-    end
   end
 end
