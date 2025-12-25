@@ -6,13 +6,13 @@ High-performance image-and-video processing for React Native powered by [Nitro M
 
 | Feature                | Android | iOS | Notes                                                                     |
 | ---------------------- | ------- | --- | ------------------------------------------------------------------------- |
-| `getMediaInfo`         | ✔︎       | ✔︎   | Reads basic metadata (duration, dimensions, type).                        |
-| `convertImageToVideo`  | ✔︎       | ✔︎   | Turns any local file or remote URL into an H.264 MP4 (typically ~30 fps). |
-| `mergeVideos`          | ✔︎       | ✔︎   | Concatenates an arbitrary list of MP4s, normalising size/FPS when needed. |
-| `watermarkVideo`       | ✔︎       | ✔︎   | Places a text watermark in 4 corners or centre – remote URLs supported.   |
-| Hardware-backed codecs | ✔︎       | ✔︎   | Uses MediaCodec / AVFoundation surfaces for efficient rendering.          |
-| Remote-URL fallback    | ✔︎       | ✔︎   | Automatically downloads HTTP/HTTPS sources to a temp cache.               |
-| Pause-free JS thread   | ✔︎       | ✔︎   | Heavy work happens in Kotlin/Swift on background queues.                  |
+| `getMediaInfo`         | ✔︎      | ✔︎  | Reads basic metadata (duration, dimensions, type).                        |
+| `convertImageToVideo`  | ✔︎      | ✔︎  | Turns any local file or remote URL into an H.264 MP4 (typically ~30 fps). |
+| `mergeVideos`          | ✔︎      | ✔︎  | Concatenates an arbitrary list of MP4s, normalising size/FPS when needed. |
+| `watermarkVideo`       | ✔︎      | ✔︎  | Places a text watermark in 4 corners or centre – remote URLs supported.   |
+| Hardware-backed codecs | ✔︎      | ✔︎  | Uses MediaCodec / AVFoundation surfaces for efficient rendering.          |
+| Remote-URL fallback    | ✔︎      | ✔︎  | Automatically downloads HTTP/HTTPS sources to a temp cache.               |
+| Pause-free JS thread   | ✔︎      | ✔︎  | Heavy work happens in Kotlin/Swift on background queues.                  |
 
 ## 📦 Installation
 
@@ -73,7 +73,7 @@ export type MediaInfoResult = {
   ok: boolean;
 
   /** What operation produced this result */
-  operation: 'getMediaInfo' | 'convert' | 'watermark' | 'trim' | 'merge';
+  operation: 'getMediaInfo' | 'convert' | 'watermark' | 'merge';
 
   /** Media type */
   type: 'image' | 'video';
