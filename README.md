@@ -2,20 +2,17 @@
 
 High-performance image-and-video processing for React Native powered by [Nitro Modules](https://nitro.margelo.com/).
 
-⚠️ Status: Experimental — not production-ready yet
-
-The API surface may change without notice, and certain edge-cases (see “Known issues” below) are still being debugged.
-
 ## ✨ Features
 
-| Feature | Android | iOS | Notes |
-| --- | --- | --- | --- |
-| `convertImageToVideo` | ✔︎ | ✔︎ | Turns any local file or remote URL into an H.264 MP4 (30 fps). |
-| `mergeVideos` | ✔︎ | ✔︎ | Concatenates an arbitrary list of MP4s, normalising size/FPS when needed. |
-| `watermarkVideo` | ✔︎ | ✔︎ | Places a text watermark in 4 corners or centre – remote URLs supported. |
-| Hardware-backed codecs | ✔︎ | ✔︎ | Uses MediaCodec / AVFoundation surfaces for zero-copy rendering. |
-| Remote-URL fallback | ✔︎ | ✔︎ | Automatically downloads HTTP/HTTPS sources to a temp cache. |
-| Pause-free JS thread | ✔︎ | ✔︎ | All heavy lifting happens in Kotlin/Swift on background queues. |
+| Feature                | Android | iOS | Notes                                                                     |
+| ---------------------- | ------- | --- | ------------------------------------------------------------------------- |
+| `getMediaInfo`         | ✔︎       | ✔︎   | Reads basic metadata (duration, dimensions, type).                        |
+| `convertImageToVideo`  | ✔︎       | ✔︎   | Turns any local file or remote URL into an H.264 MP4 (typically ~30 fps). |
+| `mergeVideos`          | ✔︎       | ✔︎   | Concatenates an arbitrary list of MP4s, normalising size/FPS when needed. |
+| `watermarkVideo`       | ✔︎       | ✔︎   | Places a text watermark in 4 corners or centre – remote URLs supported.   |
+| Hardware-backed codecs | ✔︎       | ✔︎   | Uses MediaCodec / AVFoundation surfaces for efficient rendering.          |
+| Remote-URL fallback    | ✔︎       | ✔︎   | Automatically downloads HTTP/HTTPS sources to a temp cache.               |
+| Pause-free JS thread   | ✔︎       | ✔︎   | Heavy work happens in Kotlin/Swift on background queues.                  |
 
 ## 📦 Installation
 
@@ -43,69 +40,123 @@ import {
 } from 'react-native-nitro-media-kit';
 
 // 1️⃣ Turn a PNG into a 5-second clip
-const video1 = await convertImageToVideo('https://example.com/banner.png', 5);
+const result1 = await convertImageToVideo('https://example.com/banner.png', 5);
+if (!result1.ok) throw new Error(result1.error?.message ?? 'Convert failed');
+const video1 = result1.outputUri!;
 
 // 2️⃣ Add a watermark bottom-right
-const watermarked = await watermarkVideo(
+const result2 = await watermarkVideo(
   video1,
   '© ACME Corp',
   'bottom-right' // top-left | top-right | bottom-left | bottom-right | center
 );
+if (!result2.ok) throw new Error(result2.error?.message ?? 'Watermark failed');
+const watermarked = result2.outputUri!;
 
 // 3️⃣ Merge with an existing clip
-const final = await mergeVideos([watermarked, '/storage/emulated/0/DCIM/clip.mp4']);
+const result3 = await mergeVideos([
+  watermarked,
+  '/storage/emulated/0/DCIM/clip.mp4',
+]);
+if (!result3.ok) throw new Error(result3.error?.message ?? 'Merge failed');
+const final = result3.outputUri!;
 
 console.log('Done! ->', final);
 ```
 
+## 🧾 Return Type
+
+All methods return the same shape: `Promise<MediaInfoResult>`.
+
+```ts
+export type MediaInfoResult = {
+  ok: boolean;
+
+  /** What operation produced this result */
+  operation: 'getMediaInfo' | 'convert' | 'watermark' | 'trim' | 'merge';
+
+  /** Media type */
+  type: 'image' | 'video';
+
+  /** Input media */
+  inputUri?: string;
+
+  /** Output media (if generated) */
+  outputUri?: string;
+
+  /** Core media info (images will only provide width/height) */
+  media?: {
+    durationMs?: number; // video only
+    width?: number;
+    height?: number;
+    fps?: number; // video only
+  };
+
+  /** Error info when ok = false */
+  error?: {
+    code: string;
+    message: string;
+  };
+};
+```
+
+Notes:
+
+- For **images**, `durationMs` and `fps` are **omitted** (left `undefined`) — only `width`/`height` are returned.
+- For operations that generate files (`convert`, `watermark`, `merge`), `outputUri` contains the created file path.
+
 ## 🗂️ API Reference
 
-### `convertImageToVideo(image: string, duration: number): Promise<string>`
+### `getMediaInfo(inputUri: string): Promise<MediaInfoResult>`
 
-| Param | Type | Description |
-| --- | --- | --- |
-| `image` | `string` | Local absolute path or remote URL (`http`/`https`). |
-| `duration` | `number` | Length of the generated video in seconds. |
+Reads metadata for images or videos and returns a `MediaInfoResult`.
 
-Returns: `Promise<string>` — Absolute path to the newly created MP4.
+| Param      | Type     | Description                                         |
+| ---------- | -------- | --------------------------------------------------- |
+| `inputUri` | `string` | Local absolute path or remote URL (`http`/`https`). |
 
-Under the hood the image is resized to the nearest supported H.264 resolution (1080p → 720p → 480p) while preserving aspect ratio.
+Returns: `Promise<MediaInfoResult>`.
 
-### `mergeVideos(videos: string[]): Promise<string>`
+### `convertImageToVideo(image: string, duration: number): Promise<MediaInfoResult>`
+
+| Param      | Type     | Description                                         |
+| ---------- | -------- | --------------------------------------------------- |
+| `image`    | `string` | Local absolute path or remote URL (`http`/`https`). |
+| `duration` | `number` | Length of the generated video in seconds.           |
+
+Returns: `Promise<MediaInfoResult>` — `outputUri` holds the absolute path to the newly created MP4.
+
+Under the hood the image is resized to the nearest supported H.264 resolution while preserving aspect ratio.
+
+### `mergeVideos(videos: string[]): Promise<MediaInfoResult>`
 
 Concatenates multiple MP4s into a single file. Videos with mismatched width/height/fps are re-encoded transparently.
 
-| Param | Type | Description |
-| --- | --- | --- |
+| Param    | Type       | Description                   |
+| -------- | ---------- | ----------------------------- |
 | `videos` | `string[]` | Array of local paths or URLs. |
 
-Returns: `Promise<string>` — Path to the merged file.
+Returns: `Promise<MediaInfoResult>` — `outputUri` holds the path to the merged file.
 
-### `watermarkVideo(video: string, watermark: string, position: string): Promise<string>`
+### `watermarkVideo(video: string, watermark: string, position: string): Promise<MediaInfoResult>`
 
 Adds a text watermark to any corner (or centre).
 
-| Param | Type | Description |
-| --- | --- | --- |
-| `video` | `string` | Source MP4 path or URL. |
-| `watermark` | `string` | The text to render. |
-| `position` | `string` | One of `top-left`, `top-right`, `bottom-left`, `bottom-right`, `center`. |
+| Param       | Type     | Description                                                              |
+| ----------- | -------- | ------------------------------------------------------------------------ |
+| `video`     | `string` | Source MP4 path or URL.                                                  |
+| `watermark` | `string` | The text to render.                                                      |
+| `position`  | `string` | One of `top-left`, `top-right`, `bottom-left`, `bottom-right`, `center`. |
 
-Returns: `Promise<string>` — Path to the water-marked file.
+Returns: `Promise<MediaInfoResult>` — `outputUri` holds the path to the water-marked file.
 
 ## ⚠️ Troubleshooting
 
-| Symptom | Fix |
-| --- | --- |
-| `IllegalArgumentException: No video track found…` | Ensure the input is an MP4 (H.264). Other containers aren’t supported yet. |
-| Black video on Android | Your device’s hardware codec may dislike the resolution. Use even-number dimensions (e.g. 1280×720). |
-| iOS export stuck at 0% | Check free disk space – AVFoundation can fail when temp space is low. |
-
-## 🐞 Known issues
-
-| Issue | Details |
-| --- | --- |
-| Occasional flicker in the output video | On certain GPU/driver and device combinations you may see a brief black frame or brightness flash in the output video. A fix is in progress. |
+| Symptom                                           | Fix                                                                                    |
+| ------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| `IllegalArgumentException: No video track found…` | Ensure the input is an MP4 (H.264). Other containers aren’t supported yet.             |
+| Black video on Android                            | Some hardware codecs dislike odd dimensions. Prefer even-number sizes (e.g. 1280×720). |
+| iOS export stuck at 0%                            | Check free disk space — AVFoundation can fail when temp space is low.                  |
 
 ## 🗺️ Roadmap
 

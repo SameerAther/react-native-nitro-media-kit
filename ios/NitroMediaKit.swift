@@ -4,11 +4,169 @@ import UIKit
 import NitroModules // Import Promise from NitroModules core
 
 class NitroMediaKit: HybridNitroMediaKitSpec {
-    public func convertImageToVideo(image: String, duration: Double) -> Promise<String> {
+    private func buildMediaInfo(
+        durationMs: Double? = nil,
+        width: Double? = nil,
+        height: Double? = nil,
+        fps: Double? = nil,
+        format: String? = nil,
+        sizeBytes: Double? = nil,
+        audioTracks: Double? = nil,
+        videoTracks: Double? = nil
+    ) -> MediaInfoMedia? {
+        if durationMs == nil &&
+            width == nil &&
+            height == nil &&
+            fps == nil &&
+            format == nil &&
+            sizeBytes == nil &&
+            audioTracks == nil &&
+            videoTracks == nil {
+            return nil
+        }
+        return MediaInfoMedia(
+            durationMs: durationMs,
+            width: width,
+            height: height,
+            fps: fps,
+            format: format,
+            sizeBytes: sizeBytes,
+            audioTracks: audioTracks,
+            videoTracks: videoTracks
+        )
+    }
+
+    private func fileSizeBytes(atPath path: String) -> Double? {
+        guard let size = (try? FileManager.default.attributesOfItem(atPath: path)[.size]) as? NSNumber else {
+            return nil
+        }
+        return size.doubleValue
+    }
+
+    private func makeResult(
+        ok: Bool,
+        operation: OperationType,
+        type: MediaType,
+        inputUri: String? = nil,
+        outputUri: String? = nil,
+        media: MediaInfoMedia? = nil,
+        warnings: [MediaInfoWarning]? = nil,
+        error: MediaInfoError? = nil
+    ) -> MediaInfoResult {
+        return MediaInfoResult(
+            ok: ok,
+            operation: operation,
+            type: type,
+            inputUri: inputUri,
+            outputUri: outputUri,
+            media: media,
+            warnings: warnings,
+            error: error
+        )
+    }
+
+    private func makeErrorResult(
+        operation: OperationType,
+        type: MediaType,
+        inputUri: String? = nil,
+        outputUri: String? = nil,
+        error: Error
+    ) -> MediaInfoResult {
+        let nsError = error as NSError
+        let errorInfo = MediaInfoError(
+            code: "\(nsError.domain):\(nsError.code)",
+            message: nsError.localizedDescription
+        )
+        return makeResult(
+            ok: false,
+            operation: operation,
+            type: type,
+            inputUri: inputUri,
+            outputUri: outputUri,
+            error: errorInfo
+        )
+    }
+
+    public func getMediaInfo(inputUri: String) -> Promise<MediaInfoResult> {
         return Promise.async {
+            do {
+                let localPath = try await self.getLocalFilePath(inputUri)
+                let url = URL(fileURLWithPath: localPath)
+                let ext = url.pathExtension.lowercased()
+                let sizeBytes = self.fileSizeBytes(atPath: localPath)
+
+                if let image = UIImage(contentsOfFile: localPath) {
+                    let media = self.buildMediaInfo(
+                        width: Double(image.size.width),
+                        height: Double(image.size.height),
+                        format: ext.isEmpty ? nil : ext,
+                        sizeBytes: sizeBytes,
+                        audioTracks: 0,
+                        videoTracks: 0
+                    )
+                    return self.makeResult(
+                        ok: true,
+                        operation: .getmediainfo,
+                        type: .image,
+                        inputUri: inputUri,
+                        media: media
+                    )
+                }
+
+                let asset = AVAsset(url: url)
+                let duration = try await asset.load(.duration)
+                let videoTracks = try await asset.loadTracks(withMediaType: .video)
+                let audioTracks = try await asset.loadTracks(withMediaType: .audio)
+
+                let primaryVideoTrack = videoTracks.first
+                let naturalSize = try await primaryVideoTrack?.load(.naturalSize)
+                let preferredTransform = try await primaryVideoTrack?.load(.preferredTransform)
+
+                var width: Int?
+                var height: Int?
+                if let naturalSize = naturalSize, let preferredTransform = preferredTransform {
+                    let transformedRect = CGRect(origin: .zero, size: naturalSize).applying(preferredTransform)
+                    width = Int(round(abs(transformedRect.size.width)))
+                    height = Int(round(abs(transformedRect.size.height)))
+                }
+
+                let fps = primaryVideoTrack?.nominalFrameRate
+                let media = self.buildMediaInfo(
+                    durationMs: duration.seconds.isFinite ? duration.seconds * 1000.0 : nil,
+                    width: width.map { Double($0) },
+                    height: height.map { Double($0) },
+                    fps: fps.map { Double($0) },
+                    format: ext.isEmpty ? nil : ext,
+                    sizeBytes: sizeBytes,
+                    audioTracks: Double(audioTracks.count),
+                    videoTracks: Double(videoTracks.count)
+                )
+
+                return self.makeResult(
+                    ok: true,
+                    operation: .getmediainfo,
+                    type: .video,
+                    inputUri: inputUri,
+                    media: media
+                )
+            } catch {
+                return self.makeErrorResult(
+                    operation: .getmediainfo,
+                    type: .video,
+                    inputUri: inputUri,
+                    error: error
+                )
+            }
+        }
+    }
+
+    public func convertImageToVideo(image: String, duration: Double) -> Promise<MediaInfoResult> {
+        return Promise.async {
+            var result: MediaInfoResult
             // This runs on a separate thread and can use `await` syntax
-            // Get the local file path, downloading if necessary
-            let localImagePath = try await self.getLocalFilePath(image)
+            do {
+                // Get the local file path, downloading if necessary
+                let localImagePath = try await self.getLocalFilePath(image)
 
             // Load the image
             guard let uiImage = UIImage(contentsOfFile: localImagePath) else {
@@ -83,19 +241,47 @@ class NitroMediaKit: HybridNitroMediaKitSpec {
                 writer: writer
             )
 
-            // Return the output file path
-            return outputURL.path
+                let outputPath = outputURL.path
+                let media = self.buildMediaInfo(
+                    durationMs: duration * 1000.0,
+                    width: Double(adjustedWidth),
+                    height: Double(adjustedHeight),
+                    fps: 30,
+                    format: "mp4",
+                    sizeBytes: self.fileSizeBytes(atPath: outputPath),
+                    audioTracks: 0,
+                    videoTracks: 1
+                )
+                result = self.makeResult(
+                    ok: true,
+                    operation: .convertimagetovideo,
+                    type: .video,
+                    inputUri: image,
+                    outputUri: outputPath,
+                    media: media
+                )
+            } catch {
+                result = self.makeErrorResult(
+                    operation: .convertimagetovideo,
+                    type: .video,
+                    inputUri: image,
+                    error: error
+                )
+            }
+            return result
         }
     }
 
-    public func mergeVideos(videos: [String]) -> Promise<String> {
+    public func mergeVideos(videos: [String]) -> Promise<MediaInfoResult> {
     return Promise.async {
+        var result: MediaInfoResult
         var localVideoPaths = [String]()
-        for videoPathOrUrl in videos {
-            let localPath = try await self.getLocalFilePath(videoPathOrUrl)
-            localVideoPaths.append(localPath)
-            print("Local video path: \(localPath)")
-        }
+        do {
+            for videoPathOrUrl in videos {
+                let localPath = try await self.getLocalFilePath(videoPathOrUrl)
+                localVideoPaths.append(localPath)
+                print("Local video path: \(localPath)")
+            }
         
         // Step 2: Create an AVMutableComposition
         let composition = AVMutableComposition()
@@ -225,7 +411,29 @@ class NitroMediaKit: HybridNitroMediaKitSpec {
         
         // Log and return the output file path
         print("Merged video saved at path: \(outputURL.path)")
-        return outputURL.path
+        let outputPath = outputURL.path
+        let media = self.buildMediaInfo(
+            durationMs: currentTime.seconds.isFinite ? currentTime.seconds * 1000.0 : nil,
+            format: "mp4",
+            sizeBytes: self.fileSizeBytes(atPath: outputPath),
+            audioTracks: compositionAudioTrack == nil ? 0 : 1,
+            videoTracks: 1
+        )
+        result = self.makeResult(
+            ok: true,
+            operation: .mergevideos,
+            type: .video,
+            outputUri: outputPath,
+            media: media
+        )
+        } catch {
+            result = self.makeErrorResult(
+                operation: .mergevideos,
+                type: .video,
+                error: error
+            )
+        }
+        return result
     }
 }
   
@@ -237,19 +445,34 @@ class NitroMediaKit: HybridNitroMediaKitSpec {
 #endif
   }
 
-  public func watermarkVideo(video: String, watermark: String, position: String) -> Promise<String> {
+  public func watermarkVideo(video: String, watermark: String, position: String) -> Promise<MediaInfoResult> {
     return Promise.async {
-      let localVideoPath = try await self.getLocalFilePath(video, defaultExtension: "mp4")
-      
-      // Simulator + CoreAnimationTool watermark is notoriously crashy (xpc_api_misuse + -12900).
-      // Bypass on Simulator so development doesn't get nuked.
-      if self.isSimulator {
-        let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
-        let out = docs.appendingPathComponent("watermarked_SIM_\(Int(Date().timeIntervalSince1970)).mp4")
-        if FileManager.default.fileExists(atPath: out.path) { try FileManager.default.removeItem(at: out) }
-        try FileManager.default.copyItem(at: URL(fileURLWithPath: localVideoPath), to: out)
-        return out.path
-      }
+      var result: MediaInfoResult
+      do {
+        let localVideoPath = try await self.getLocalFilePath(video, defaultExtension: "mp4")
+        
+        // Simulator + CoreAnimationTool watermark is notoriously crashy (xpc_api_misuse + -12900).
+        // Bypass on Simulator so development doesn't get nuked.
+        if self.isSimulator {
+          let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
+          let out = docs.appendingPathComponent("watermarked_SIM_\(Int(Date().timeIntervalSince1970)).mp4")
+          if FileManager.default.fileExists(atPath: out.path) { try FileManager.default.removeItem(at: out) }
+          try FileManager.default.copyItem(at: URL(fileURLWithPath: localVideoPath), to: out)
+          let outputPath = out.path
+          let media = self.buildMediaInfo(
+            format: "mp4",
+            sizeBytes: self.fileSizeBytes(atPath: outputPath)
+          )
+          result = self.makeResult(
+            ok: true,
+            operation: .watermarkvideo,
+            type: .video,
+            inputUri: video,
+            outputUri: outputPath,
+            media: media
+          )
+          return result
+        }
       
       // ---- Your existing CoreAnimationTool export code (device only) ----
       let asset = AVAsset(url: URL(fileURLWithPath: localVideoPath))
@@ -258,6 +481,7 @@ class NitroMediaKit: HybridNitroMediaKitSpec {
         throw NSError(domain: "HybridMediaKit", code: -1, userInfo: [NSLocalizedDescriptionKey: "Video duration is zero"])
       }
       
+      let audioTrackCount = try await asset.loadTracks(withMediaType: .audio).count
       guard let assetVideoTrack = try await asset.loadTracks(withMediaType: .video).first else {
         throw NSError(domain: "HybridMediaKit", code: -1, userInfo: [NSLocalizedDescriptionKey: "No video track found"])
       }
@@ -405,7 +629,34 @@ class NitroMediaKit: HybridNitroMediaKitSpec {
         }
       }
       
-      return outputURL.path
+      let outputPath = outputURL.path
+      let media = self.buildMediaInfo(
+        durationMs: duration.seconds.isFinite ? duration.seconds * 1000.0 : nil,
+        width: Double(renderW),
+        height: Double(renderH),
+        fps: 30,
+        format: "mp4",
+        sizeBytes: self.fileSizeBytes(atPath: outputPath),
+        audioTracks: Double(audioTrackCount),
+        videoTracks: 1
+      )
+      result = self.makeResult(
+        ok: true,
+        operation: .watermarkvideo,
+        type: .video,
+        inputUri: video,
+        outputUri: outputPath,
+        media: media
+      )
+      } catch {
+        result = self.makeErrorResult(
+          operation: .watermarkvideo,
+          type: .video,
+          inputUri: video,
+          error: error
+        )
+      }
+      return result
     }
   }
 

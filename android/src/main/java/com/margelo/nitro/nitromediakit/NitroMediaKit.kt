@@ -17,8 +17,6 @@ import java.net.URL
 import android.util.Log
 import android.media.MediaCodecInfo.VideoCapabilities
 import android.util.Range
-import com.margelo.nitro.core.AnyMap
-import com.margelo.nitro.core.AnyValue
 import com.margelo.nitro.core.ArrayBuffer
 import java.nio.ByteBuffer
 import android.view.Surface
@@ -36,6 +34,83 @@ class NitroMediaKit : HybridNitroMediaKitSpec() {
         ?: throw IllegalStateException("Application context is null")
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    private fun buildMediaInfo(
+        durationMs: Double? = null,
+        width: Double? = null,
+        height: Double? = null,
+        fps: Double? = null,
+        format: String? = null,
+        sizeBytes: Double? = null,
+        audioTracks: Double? = null,
+        videoTracks: Double? = null
+    ): MediaInfoMedia? {
+        if (
+            durationMs == null &&
+            width == null &&
+            height == null &&
+            fps == null &&
+            format == null &&
+            sizeBytes == null &&
+            audioTracks == null &&
+            videoTracks == null
+        ) {
+            return null
+        }
+        return MediaInfoMedia(
+            durationMs = durationMs,
+            width = width,
+            height = height,
+            fps = fps,
+            format = format,
+            sizeBytes = sizeBytes,
+            audioTracks = audioTracks,
+            videoTracks = videoTracks
+        )
+    }
+
+    private fun makeResult(
+        ok: Boolean,
+        operation: OperationType,
+        type: MediaType,
+        inputUri: String? = null,
+        outputUri: String? = null,
+        media: MediaInfoMedia? = null,
+        warnings: Array<MediaInfoWarning>? = null,
+        error: MediaInfoError? = null
+    ): MediaInfoResult {
+        return MediaInfoResult(
+            ok = ok,
+            operation = operation,
+            type = type,
+            inputUri = inputUri,
+            outputUri = outputUri,
+            media = media,
+            warnings = warnings,
+            error = error
+        )
+    }
+
+    private fun makeErrorResult(
+        operation: OperationType,
+        type: MediaType,
+        inputUri: String? = null,
+        outputUri: String? = null,
+        error: Exception
+    ): MediaInfoResult {
+        val errorInfo = MediaInfoError(
+            code = error.javaClass.simpleName ?: "Error",
+            message = error.message ?: "Unknown error"
+        )
+        return makeResult(
+            ok = false,
+            operation = operation,
+            type = type,
+            inputUri = inputUri,
+            outputUri = outputUri,
+            error = errorInfo
+        )
+    }
 
     private fun getLocalFilePath(pathOrUrl: String): String {
         return try {
@@ -135,8 +210,95 @@ class NitroMediaKit : HybridNitroMediaKitSpec() {
         return path.startsWith("http://") || path.startsWith("https://")
     }
 
-    override fun convertImageToVideo(image: String, duration: Double): Promise<String> {
+    override fun getMediaInfo(inputUri: String): Promise<MediaInfoResult> {
         return Promise.async {
+            var extractor: MediaExtractor? = null
+            var retriever: MediaMetadataRetriever? = null
+            var typeGuess = MediaType.VIDEO
+            try {
+                val localPath = getLocalFilePath(inputUri)
+                val file = File(localPath)
+                val sizeBytes = if (file.exists()) file.length().toDouble() else null
+                val extension = file.extension.lowercase().ifEmpty { null }
+
+                val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                BitmapFactory.decodeFile(localPath, options)
+                if (options.outWidth > 0 && options.outHeight > 0) {
+                    typeGuess = MediaType.IMAGE
+                    val media = buildMediaInfo(
+                        width = options.outWidth.toDouble(),
+                        height = options.outHeight.toDouble(),
+                        format = extension,
+                        sizeBytes = sizeBytes,
+                        audioTracks = 0.0,
+                        videoTracks = 0.0
+                    )
+                    return@async makeResult(
+                        ok = true,
+                        operation = OperationType.GETMEDIAINFO,
+                        type = MediaType.IMAGE,
+                        inputUri = inputUri,
+                        media = media
+                    )
+                }
+
+                retriever = MediaMetadataRetriever().apply { setDataSource(localPath) }
+                val durationMs = retriever?.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toDoubleOrNull()
+                val width = retriever?.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toDoubleOrNull()
+                val height = retriever?.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toDoubleOrNull()
+
+                extractor = MediaExtractor().apply { setDataSource(localPath) }
+                var videoTracks = 0
+                var audioTracks = 0
+                var fps: Double? = null
+                for (i in 0 until extractor!!.trackCount) {
+                    val format = extractor!!.getTrackFormat(i)
+                    val mime = format.getString(MediaFormat.KEY_MIME) ?: ""
+                    if (mime.startsWith("video/")) {
+                        videoTracks++
+                        if (fps == null && format.containsKey(MediaFormat.KEY_FRAME_RATE)) {
+                            fps = format.getInteger(MediaFormat.KEY_FRAME_RATE).toDouble()
+                        }
+                    } else if (mime.startsWith("audio/")) {
+                        audioTracks++
+                    }
+                }
+
+                val media = buildMediaInfo(
+                    durationMs = durationMs,
+                    width = width,
+                    height = height,
+                    fps = fps,
+                    format = extension,
+                    sizeBytes = sizeBytes,
+                    audioTracks = audioTracks.toDouble(),
+                    videoTracks = videoTracks.toDouble()
+                )
+
+                makeResult(
+                    ok = true,
+                    operation = OperationType.GETMEDIAINFO,
+                    type = MediaType.VIDEO,
+                    inputUri = inputUri,
+                    media = media
+                )
+            } catch (e: Exception) {
+                makeErrorResult(
+                    operation = OperationType.GETMEDIAINFO,
+                    type = typeGuess,
+                    inputUri = inputUri,
+                    error = e
+                )
+            } finally {
+                runCatching { extractor?.release() }
+                runCatching { retriever?.release() }
+            }
+        }
+    }
+
+    override fun convertImageToVideo(image: String, duration: Double): Promise<MediaInfoResult> {
+        return Promise.async {
+            var result: MediaInfoResult
             var encoder: MediaCodec? = null
             var muxer: MediaMuxer? = null
             var eglHelper: EglHelper? = null
@@ -217,7 +379,32 @@ class NitroMediaKit : HybridNitroMediaKitSpec() {
                     untilEos = true
                 )
 
-                videoFile.absolutePath
+                val outputPath = videoFile.absolutePath
+                val media = buildMediaInfo(
+                    durationMs = duration * 1000.0,
+                    width = width.toDouble(),
+                    height = height.toDouble(),
+                    fps = frameRate.toDouble(),
+                    format = "mp4",
+                    sizeBytes = File(outputPath).length().toDouble(),
+                    audioTracks = 0.0,
+                    videoTracks = 1.0
+                )
+                result = makeResult(
+                    ok = true,
+                    operation = OperationType.CONVERTIMAGETOVIDEO,
+                    type = MediaType.VIDEO,
+                    inputUri = image,
+                    outputUri = outputPath,
+                    media = media
+                )
+            } catch (e: Exception) {
+                result = makeErrorResult(
+                    operation = OperationType.CONVERTIMAGETOVIDEO,
+                    type = MediaType.VIDEO,
+                    inputUri = image,
+                    error = e
+                )
             } finally {
                 eglHelper?.release()
                 runCatching { encoder?.stop() }
@@ -225,16 +412,19 @@ class NitroMediaKit : HybridNitroMediaKitSpec() {
                 if (muxState.started) runCatching { muxer?.stop() }
                 runCatching { muxer?.release() }
             }
+            result
         }
     }
 
-    override fun mergeVideos(videos: Array<String>): Promise<String> {
+    override fun mergeVideos(videos: Array<String>): Promise<MediaInfoResult> {
         return Promise.async {
+            var result: MediaInfoResult
             var muxer: MediaMuxer? = null
             var isMuxerStarted = false
             var outputVideoTrackIndex = -1
             var outputAudioTrackIndex = -1
             val tempFiles = mutableListOf<String>()
+            var timelineUs = 0L
 
             try {
                 // Step 1: Analyze all videos
@@ -304,8 +494,6 @@ class NitroMediaKit : HybridNitroMediaKitSpec() {
                 // Step 5: Copy samples (separate extractors inside copyTrack)
                 val vMono = MonotonicPts()
                 val aMono = MonotonicPts()
-                var timelineUs = 0L
-
                 for (videoPath in videosToMerge) {
                     val vDur = if (outputVideoTrackIndex != -1) {
                         copyTrack(
@@ -331,10 +519,28 @@ class NitroMediaKit : HybridNitroMediaKitSpec() {
 
                     timelineUs += maxOf(vDur, aDur)
                 }
-                videoFile.absolutePath
+                val outputPath = videoFile.absolutePath
+                val media = buildMediaInfo(
+                    durationMs = if (timelineUs > 0) timelineUs / 1000.0 else null,
+                    format = "mp4",
+                    sizeBytes = File(outputPath).length().toDouble(),
+                    audioTracks = if (outputAudioTrackIndex != -1) 1.0 else 0.0,
+                    videoTracks = if (outputVideoTrackIndex != -1) 1.0 else 0.0
+                )
+                result = makeResult(
+                    ok = true,
+                    operation = OperationType.MERGEVIDEOS,
+                    type = MediaType.VIDEO,
+                    outputUri = outputPath,
+                    media = media
+                )
             } catch (e: Exception) {
                 Log.e("MediaKit", "Merge failed", e)
-                throw e
+                result = makeErrorResult(
+                    operation = OperationType.MERGEVIDEOS,
+                    type = MediaType.VIDEO,
+                    error = e
+                )
             } finally {
                 try {
                     if (isMuxerStarted) muxer?.stop()
@@ -345,11 +551,13 @@ class NitroMediaKit : HybridNitroMediaKitSpec() {
 
                 for (tempFile in tempFiles) runCatching { File(tempFile).delete() }
             }
+            result
         }
     }
 
-    override fun watermarkVideo(video: String, watermark: String, position: String): Promise<String> {
+    override fun watermarkVideo(video: String, watermark: String, position: String): Promise<MediaInfoResult> {
         return Promise.async {
+            var result: MediaInfoResult
             var extractor: MediaExtractor? = null
             var decoder: MediaCodec? = null
             var encoder: MediaCodec? = null
@@ -391,6 +599,9 @@ class NitroMediaKit : HybridNitroMediaKitSpec() {
                 val frameRate = if (inputFormat.containsKey(MediaFormat.KEY_FRAME_RATE)) {
                     inputFormat.getInteger(MediaFormat.KEY_FRAME_RATE).coerceIn(1, 120)
                 } else 30
+                val durationUs = if (inputFormat.containsKey(MediaFormat.KEY_DURATION)) {
+                    inputFormat.getLong(MediaFormat.KEY_DURATION)
+                } else null
 
                 // ---- Encoder ----
                 val outputFormat = MediaFormat.createVideoFormat(MediaFormat.MIMETYPE_VIDEO_AVC, width, height).apply {
@@ -576,7 +787,32 @@ class NitroMediaKit : HybridNitroMediaKitSpec() {
                     )
                 }
 
-                outputFile.absolutePath
+                val outputPath = outputFile.absolutePath
+                val media = buildMediaInfo(
+                    durationMs = durationUs?.let { it / 1000.0 },
+                    width = width.toDouble(),
+                    height = height.toDouble(),
+                    fps = frameRate.toDouble(),
+                    format = "mp4",
+                    sizeBytes = File(outputPath).length().toDouble(),
+                    audioTracks = if (audioFormat != null) 1.0 else 0.0,
+                    videoTracks = 1.0
+                )
+                result = makeResult(
+                    ok = true,
+                    operation = OperationType.WATERMARKVIDEO,
+                    type = MediaType.VIDEO,
+                    inputUri = video,
+                    outputUri = outputPath,
+                    media = media
+                )
+            } catch (e: Exception) {
+                result = makeErrorResult(
+                    operation = OperationType.WATERMARKVIDEO,
+                    type = MediaType.VIDEO,
+                    inputUri = video,
+                    error = e
+                )
             } finally {
                 runCatching { extractor?.release() }
                 runCatching { decoder?.stop(); decoder?.release() }
@@ -585,6 +821,7 @@ class NitroMediaKit : HybridNitroMediaKitSpec() {
                 runCatching { muxer?.release() }
                 runCatching { eglHelper?.release() }
             }
+            result
         }
     }
 

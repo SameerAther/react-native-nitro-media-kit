@@ -1,8 +1,13 @@
 import { NitroModules } from 'react-native-nitro-modules';
 import type { NitroMediaKit as NitroMediaKitObject } from './NitroMediaKit.nitro';
 
+export type { MediaInfoResult, MediaInfoWarning } from './NitroMediaKit.nitro';
+
 export const NitroMediaKit =
   NitroModules.createHybridObject<NitroMediaKitObject>('NitroMediaKit');
+
+export const getMediaInfo: NitroMediaKitObject['getMediaInfo'] = (inputUri) =>
+  NitroMediaKit.getMediaInfo(inputUri);
 
 export const convertImageToVideo: NitroMediaKitObject['convertImageToVideo'] = (
   image,
