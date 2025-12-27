@@ -1,7 +1,6 @@
 import { View, StyleSheet, Alert, Button } from 'react-native';
 import {
   convertImageToVideo,
-  getMediaInfo,
   mergeVideos,
   watermarkVideo,
 } from 'react-native-nitro-media-kit';
