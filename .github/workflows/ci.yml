@@ -112,26 +112,30 @@ jobs:
   build-ios:
     runs-on: macos-15
     env:
-      XCODE_VERSION: 16.2
+      XCODE_VERSION: '16.1'
       TURBO_CACHE_DIR: .turbo/ios
     steps:
       - name: Checkout
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+
+      - name: Use appropriate Xcode version
+        uses: maxim-lobanov/setup-xcode@60606e260d2fc5762a71e64e74b2174e8ea3c8bd
+        with:
+          xcode-version: ${{ env.XCODE_VERSION }}
+
+      # Fail fast + prove what runtimes exist on the runner
+      - name: Diagnose Xcode platforms (debug)
+        run: |
+          set -euo pipefail
+          xcodebuild -version
+          xcodebuild -showsdks
+          xcrun simctl list runtimes | sed -n '1,200p'
 
       - name: Setup
         uses: ./.github/actions/setup
 
       - name: Generate nitrogen code
         run: yarn nitrogen
-
-      - name: Force iOS deployment target to 16.0 (example project)
-        run: |
-          set -euo pipefail
-          PBXPROJ="example/ios/NitroMediaKitExample.xcodeproj/project.pbxproj"
-          if [ -f "$PBXPROJ" ]; then
-            perl -0777 -pe 's/IPHONEOS_DEPLOYMENT_TARGET = 15\.[0-9]+;/IPHONEOS_DEPLOYMENT_TARGET = 16.0;/g;
-                           s/IPHONEOS_DEPLOYMENT_TARGET = 15;/IPHONEOS_DEPLOYMENT_TARGET = 16.0;/g' -i "$PBXPROJ"
-          fi
 
       - name: Cache turborepo for iOS
         uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684
@@ -141,21 +145,7 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-turborepo-ios-
 
-      - name: Check turborepo cache for iOS
-        run: |
-          TURBO_CACHE_STATUS=$(node -p "($(yarn turbo run build:ios --cache-dir='${{ env.TURBO_CACHE_DIR }}' --dry=json)).tasks.find(t => t.task === 'build:ios').cache.status")
-          if [[ $TURBO_CACHE_STATUS == "HIT" ]]; then
-            echo "turbo_cache_hit=1" >> $GITHUB_ENV
-          fi
-
-      - name: Use appropriate Xcode version
-        if: env.turbo_cache_hit != 1
-        uses: maxim-lobanov/setup-xcode@60606e260d2fc5762a71e64e74b2174e8ea3c8bd
-        with:
-          xcode-version: ${{ env.XCODE_VERSION }}
-
       - name: Setup Ruby (pin) + Bundler cache
-        if: env.turbo_cache_hit != 1
         uses: ruby/setup-ruby@v1
         with:
           ruby-version: '3.1.2'
@@ -164,10 +154,14 @@ jobs:
           working-directory: example
 
       - name: Install CocoaPods deps
-        if: env.turbo_cache_hit != 1
         run: |
+          set -euo pipefail
           cd example
           bundle exec pod install --project-directory=ios --repo-update
 
+      # Key part: force a destination that doesn't require iOS 18.2 runtime resolution
       - name: Build example for iOS
-        run: yarn turbo run build:ios --cache-dir="${{ env.TURBO_CACHE_DIR }}"
+        env:
+          XCODE_XCCONFIG_FILE: ''
+        run: |
+          yarn turbo run build:ios --cache-dir="${{ env.TURBO_CACHE_DIR }}"
