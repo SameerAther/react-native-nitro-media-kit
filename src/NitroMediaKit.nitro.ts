@@ -6,7 +6,13 @@ export type OperationType =
   | 'getMediaInfo'
   | 'convertImageToVideo'
   | 'watermarkVideo'
-  | 'mergeVideos';
+  | 'mergeVideos'
+  | 'splitVideo';
+
+export type VideoSegment = {
+  startMs: number;
+  endMs: number;
+};
 
 export type MediaInfoWarning = {
   code: string;
@@ -38,6 +44,7 @@ export type MediaInfoResult = {
 
   inputUri?: string;
   outputUri?: string;
+  segments?: string[];
 
   media?: MediaInfoMedia;
 
@@ -57,6 +64,7 @@ export interface NitroMediaKit
     duration: number
   ): Promise<MediaInfoResult>;
   mergeVideos(videos: string[]): Promise<MediaInfoResult>;
+  splitVideo(video: string, segments: VideoSegment[]): Promise<MediaInfoResult>;
   watermarkVideo(
     video: string,
     watermark: string,

@@ -2,6 +2,7 @@ import { View, StyleSheet, Alert, Button } from 'react-native';
 import {
   convertImageToVideo,
   mergeVideos,
+  splitVideo,
   watermarkVideo,
 } from 'react-native-nitro-media-kit';
 
@@ -63,6 +64,35 @@ export default function App() {
       console.error('Error watermarking video:', error);
     }
   };
+
+  const handleSplitVideo = async () => {
+    try {
+      const result = await splitVideo(
+        'https://www.pexels.com/download/video/4114797/?fps=25.0&h=240&w=426',
+        [
+          { startMs: 0, endMs: 2_000 },
+          { startMs: 2_000, endMs: 4_000 },
+          { startMs: 4_000, endMs: 6_000 },
+        ]
+      );
+
+      if (!result.ok) {
+        Alert.alert('Error', result.error?.message ?? 'Failed to split video');
+        return;
+      }
+
+      const outputSegments = result.segments ?? [];
+      Alert.alert(
+        'Video Split Complete',
+        `Created ${outputSegments.length} segments`
+      );
+      console.log('Split segment paths:', outputSegments);
+    } catch (error) {
+      console.error('Error splitting video:', error);
+      Alert.alert('Error', 'Failed to split video');
+    }
+  };
+
   return (
     <View style={styles.container}>
       <Button
@@ -71,6 +101,7 @@ export default function App() {
       />
       <Button title="Merge Videos" onPress={handleMergeVideos} />
       <Button title="Watermark Video" onPress={handleWatermark} />
+      <Button title="Split Video" onPress={handleSplitVideo} />
     </View>
   );
 }

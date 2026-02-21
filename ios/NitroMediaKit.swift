@@ -61,6 +61,7 @@ class NitroMediaKit: HybridNitroMediaKitSpec {
         type: MediaType,
         inputUri: String? = nil,
         outputUri: String? = nil,
+        segments: [String]? = nil,
         media: MediaInfoMedia? = nil,
         warnings: [MediaInfoWarning]? = nil,
         error: MediaInfoError? = nil
@@ -71,6 +72,7 @@ class NitroMediaKit: HybridNitroMediaKitSpec {
             type: type,
             inputUri: inputUri,
             outputUri: outputUri,
+            segments: segments,
             media: media,
             warnings: warnings,
             error: error
@@ -480,6 +482,102 @@ class NitroMediaKit: HybridNitroMediaKitSpec {
         return result
     }
 }
+
+  public func splitVideo(video: String, segments: [VideoSegment]) -> Promise<MediaInfoResult> {
+    return Promise.async {
+      var result: MediaInfoResult
+      do {
+        guard !segments.isEmpty else {
+          throw NSError(
+            domain: "HybridMediaKit",
+            code: -1,
+            userInfo: [NSLocalizedDescriptionKey: "`segments` must contain at least one range."]
+          )
+        }
+
+        let localVideoPath = try await self.getLocalFilePath(video, defaultExtension: "mp4")
+        let asset = AVAsset(url: URL(fileURLWithPath: localVideoPath))
+        let duration = try await asset.load(.duration)
+        guard duration.seconds.isFinite && duration.seconds > 0 else {
+          throw NSError(
+            domain: "HybridMediaKit",
+            code: -1,
+            userInfo: [NSLocalizedDescriptionKey: "Input video has invalid duration."]
+          )
+        }
+
+        let durationMs = duration.seconds * 1000.0
+        let videoTracks = try await asset.loadTracks(withMediaType: .video)
+        guard let primaryVideoTrack = videoTracks.first else {
+          throw NSError(
+            domain: "HybridMediaKit",
+            code: -1,
+            userInfo: [NSLocalizedDescriptionKey: "No video track found in input."]
+          )
+        }
+        let audioTracks = try await asset.loadTracks(withMediaType: .audio)
+
+        let naturalSize = try await primaryVideoTrack.load(.naturalSize)
+        let preferredTransform = try await primaryVideoTrack.load(.preferredTransform)
+        let transformedRect = CGRect(origin: .zero, size: naturalSize).applying(preferredTransform)
+        let transformedWidth = abs(transformedRect.size.width)
+        let transformedHeight = abs(transformedRect.size.height)
+        let naturalWidth = abs(naturalSize.width)
+        let naturalHeight = abs(naturalSize.height)
+
+        let width = Double(transformedWidth > 0 ? transformedWidth : naturalWidth)
+        let height = Double(transformedHeight > 0 ? transformedHeight : naturalHeight)
+        let fps = self.resolveFps(for: primaryVideoTrack) ?? 30
+
+        var outputSegments: [String] = []
+        outputSegments.reserveCapacity(segments.count)
+
+        for (index, segment) in segments.enumerated() {
+          let normalized = try self.normalizedSplitSegment(
+            segment: segment,
+            index: index,
+            totalDurationMs: durationMs
+          )
+          let outputPath = try await self.exportVideoSegment(
+            asset: asset,
+            startMs: normalized.startMs,
+            endMs: normalized.endMs,
+            index: index
+          )
+          outputSegments.append(outputPath)
+        }
+
+        let inputExtension = URL(fileURLWithPath: localVideoPath).pathExtension.lowercased()
+        let media = self.buildMediaInfo(
+          durationMs: durationMs,
+          width: width,
+          height: height,
+          fps: fps,
+          format: inputExtension.isEmpty ? nil : inputExtension,
+          sizeBytes: self.fileSizeBytes(atPath: localVideoPath),
+          audioTracks: Double(audioTracks.count),
+          videoTracks: Double(videoTracks.count)
+        )
+
+        result = self.makeResult(
+          ok: true,
+          operation: .splitvideo,
+          type: .video,
+          inputUri: video,
+          segments: outputSegments,
+          media: media
+        )
+      } catch {
+        result = self.makeErrorResult(
+          operation: .splitvideo,
+          type: .video,
+          inputUri: video,
+          error: error
+        )
+      }
+      return result
+    }
+  }
   
   private var isSimulator: Bool {
 #if targetEnvironment(simulator)
@@ -705,6 +803,125 @@ class NitroMediaKit: HybridNitroMediaKitSpec {
   }
 
 
+
+  private func normalizedSplitSegment(
+    segment: VideoSegment,
+    index: Int,
+    totalDurationMs: Double
+  ) throws -> (startMs: Double, endMs: Double) {
+    guard segment.startMs.isFinite, segment.endMs.isFinite else {
+      throw NSError(
+        domain: "HybridMediaKit",
+        code: -1,
+        userInfo: [NSLocalizedDescriptionKey: "Segment at index \(index) must use finite startMs/endMs values."]
+      )
+    }
+
+    let startMs = min(max(segment.startMs, 0), totalDurationMs)
+    let endMs = min(max(segment.endMs, 0), totalDurationMs)
+    guard endMs > startMs else {
+      throw NSError(
+        domain: "HybridMediaKit",
+        code: -1,
+        userInfo: [NSLocalizedDescriptionKey: "Segment at index \(index) must satisfy endMs > startMs within video duration."]
+      )
+    }
+
+    return (startMs: startMs, endMs: endMs)
+  }
+
+  private func splitOutputFileType(
+    for exporter: AVAssetExportSession
+  ) throws -> (fileType: AVFileType, fileExtension: String) {
+    if exporter.supportedFileTypes.contains(.mp4) {
+      return (.mp4, "mp4")
+    }
+    if exporter.supportedFileTypes.contains(.mov) {
+      return (.mov, "mov")
+    }
+    if exporter.supportedFileTypes.contains(.m4v) {
+      return (.m4v, "m4v")
+    }
+    guard let fallback = exporter.supportedFileTypes.first else {
+      throw NSError(
+        domain: "HybridMediaKit",
+        code: -1,
+        userInfo: [NSLocalizedDescriptionKey: "No supported export file types available for split operation."]
+      )
+    }
+    if fallback == .mov {
+      return (.mov, "mov")
+    }
+    if fallback == .m4v {
+      return (.m4v, "m4v")
+    }
+    return (fallback, "mp4")
+  }
+
+  private func exportVideoSegment(
+    asset: AVAsset,
+    startMs: Double,
+    endMs: Double,
+    index: Int
+  ) async throws -> String {
+    guard let exporter = AVAssetExportSession(
+      asset: asset,
+      presetName: AVAssetExportPresetHighestQuality
+    ) else {
+      throw NSError(
+        domain: "HybridMediaKit",
+        code: -1,
+        userInfo: [NSLocalizedDescriptionKey: "Cannot create AVAssetExportSession for split operation."]
+      )
+    }
+
+    let (fileType, fileExtension) = try self.splitOutputFileType(for: exporter)
+    let documentsDirectory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
+    let outputURL = documentsDirectory
+      .appendingPathComponent("split_video_\(Int(Date().timeIntervalSince1970))_\(index)")
+      .appendingPathExtension(fileExtension)
+
+    if FileManager.default.fileExists(atPath: outputURL.path) {
+      try FileManager.default.removeItem(at: outputURL)
+    }
+
+    exporter.outputURL = outputURL
+    exporter.outputFileType = fileType
+    exporter.shouldOptimizeForNetworkUse = true
+    exporter.timeRange = CMTimeRange(
+      start: CMTime(seconds: startMs / 1000.0, preferredTimescale: 600),
+      end: CMTime(seconds: endMs / 1000.0, preferredTimescale: 600)
+    )
+
+    try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+      exporter.exportAsynchronously {
+        switch exporter.status {
+        case .completed:
+          continuation.resume()
+        case .failed:
+          continuation.resume(
+            throwing: exporter.error ?? NSError(
+              domain: "HybridMediaKit",
+              code: -1,
+              userInfo: [NSLocalizedDescriptionKey: "Split export failed for segment index \(index)."]
+            )
+          )
+        case .cancelled:
+          continuation.resume(
+            throwing: NSError(
+              domain: "HybridMediaKit",
+              code: -1,
+              userInfo: [NSLocalizedDescriptionKey: "Split export cancelled for segment index \(index)."]
+            )
+          )
+        default:
+          break
+        }
+      }
+    }
+
+    return outputURL.path
+  }
 
     // Helper function to determine if the path is a remote URL and download if necessary
   private func getLocalFilePath(_ pathOrUrl: String, defaultExtension: String? = nil) async throws -> String {

@@ -75,6 +75,7 @@ class NitroMediaKit : HybridNitroMediaKitSpec() {
         type: MediaType,
         inputUri: String? = null,
         outputUri: String? = null,
+        segments: Array<String>? = null,
         media: MediaInfoMedia? = null,
         warnings: Array<MediaInfoWarning>? = null,
         error: MediaInfoError? = null
@@ -85,6 +86,7 @@ class NitroMediaKit : HybridNitroMediaKitSpec() {
             type = type,
             inputUri = inputUri,
             outputUri = outputUri,
+            segments = segments,
             media = media,
             warnings = warnings,
             error = error
@@ -137,6 +139,17 @@ class NitroMediaKit : HybridNitroMediaKitSpec() {
         var firstPtsUs = -1L
         val mono = MonotonicPts()
     }
+
+    private data class SegmentRangeUs(
+        val startUs: Long,
+        val endUs: Long
+    )
+
+    private data class SegmentMuxerTrackState(
+        val outputTrackIndex: Int,
+        val mono: MonotonicPts = MonotonicPts(),
+        var firstPtsUs: Long = -1L
+    )
 
     private fun drainEncoderToMuxer(
         encoder: MediaCodec,
@@ -568,6 +581,117 @@ class NitroMediaKit : HybridNitroMediaKitSpec() {
         }
     }
 
+    override fun splitVideo(video: String, segments: Array<VideoSegment>): Promise<MediaInfoResult> {
+        return Promise.async {
+            var extractor: MediaExtractor? = null
+            var retriever: MediaMetadataRetriever? = null
+            try {
+                if (segments.isEmpty()) {
+                    throw IllegalArgumentException("`segments` must contain at least one range.")
+                }
+
+                val localVideoPath = getLocalFilePath(video)
+                retriever = MediaMetadataRetriever().apply { setDataSource(localVideoPath) }
+                val durationMs = retriever!!
+                    .extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
+                    ?.toDoubleOrNull()
+                    ?: throw IllegalArgumentException("Unable to read video duration for split operation.")
+                val durationUs = (durationMs * 1000.0).toLong()
+                if (durationUs <= 0L) {
+                    throw IllegalArgumentException("Input video has invalid duration.")
+                }
+
+                var width = retriever!!
+                    .extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)
+                    ?.toDoubleOrNull()
+                var height = retriever!!
+                    .extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)
+                    ?.toDoubleOrNull()
+                val captureFps = retriever!!
+                    .extractMetadata(MediaMetadataRetriever.METADATA_KEY_CAPTURE_FRAMERATE)
+                    ?.toDoubleOrNull()
+
+                extractor = MediaExtractor().apply { setDataSource(localVideoPath) }
+
+                var videoTracks = 0
+                var audioTracks = 0
+                var fps: Double? = captureFps
+                for (i in 0 until extractor!!.trackCount) {
+                    val format = extractor!!.getTrackFormat(i)
+                    val mime = format.getString(MediaFormat.KEY_MIME) ?: ""
+                    if (mime.startsWith("video/")) {
+                        videoTracks++
+                        if (width == null && format.containsKey(MediaFormat.KEY_WIDTH)) {
+                            width = format.getInteger(MediaFormat.KEY_WIDTH).toDouble()
+                        }
+                        if (height == null && format.containsKey(MediaFormat.KEY_HEIGHT)) {
+                            height = format.getInteger(MediaFormat.KEY_HEIGHT).toDouble()
+                        }
+                        if (fps == null && format.containsKey(MediaFormat.KEY_FRAME_RATE)) {
+                            fps = format.getInteger(MediaFormat.KEY_FRAME_RATE).toDouble()
+                        }
+                    } else if (mime.startsWith("audio/")) {
+                        audioTracks++
+                    }
+                }
+                if (videoTracks == 0) {
+                    throw IllegalArgumentException("No video track found in $localVideoPath")
+                }
+                if (fps == null) {
+                    fps = 30.0
+                }
+
+                val normalizedSegments = segments.mapIndexed { index, segment ->
+                    normalizeSplitSegmentRange(
+                        segment = segment,
+                        index = index,
+                        totalDurationUs = durationUs
+                    )
+                }
+                val outputSegments = normalizedSegments.mapIndexed { index, range ->
+                    splitSingleSegment(
+                        inputPath = localVideoPath,
+                        segment = range,
+                        segmentIndex = index
+                    )
+                }.toTypedArray()
+
+                val file = File(localVideoPath)
+                val extension = file.extension.lowercase().ifEmpty { null }
+                val sizeBytes = if (file.exists()) file.length().toDouble() else null
+                val media = buildMediaInfo(
+                    durationMs = durationMs,
+                    width = width,
+                    height = height,
+                    fps = fps,
+                    format = extension,
+                    sizeBytes = sizeBytes,
+                    audioTracks = audioTracks.toDouble(),
+                    videoTracks = videoTracks.toDouble()
+                )
+
+                makeResult(
+                    ok = true,
+                    operation = OperationType.SPLITVIDEO,
+                    type = MediaType.VIDEO,
+                    inputUri = video,
+                    segments = outputSegments,
+                    media = media
+                )
+            } catch (e: Exception) {
+                makeErrorResult(
+                    operation = OperationType.SPLITVIDEO,
+                    type = MediaType.VIDEO,
+                    inputUri = video,
+                    error = e
+                )
+            } finally {
+                runCatching { extractor?.release() }
+                runCatching { retriever?.release() }
+            }
+        }
+    }
+
     override fun watermarkVideo(video: String, watermark: String, position: String): Promise<MediaInfoResult> {
         return Promise.async {
             var result: MediaInfoResult
@@ -835,6 +959,147 @@ class NitroMediaKit : HybridNitroMediaKitSpec() {
                 runCatching { eglHelper?.release() }
             }
             result
+        }
+    }
+
+    private fun normalizeSplitSegmentRange(
+        segment: VideoSegment,
+        index: Int,
+        totalDurationUs: Long
+    ): SegmentRangeUs {
+        if (!segment.startMs.isFinite() || !segment.endMs.isFinite()) {
+            throw IllegalArgumentException(
+                "Segment at index $index must use finite startMs/endMs values."
+            )
+        }
+
+        val startUs = (segment.startMs * 1000.0).toLong().coerceIn(0L, totalDurationUs)
+        val endUs = (segment.endMs * 1000.0).toLong().coerceIn(0L, totalDurationUs)
+        if (endUs <= startUs) {
+            throw IllegalArgumentException(
+                "Segment at index $index must satisfy endMs > startMs within video duration."
+            )
+        }
+
+        return SegmentRangeUs(startUs = startUs, endUs = endUs)
+    }
+
+    private fun splitSingleSegment(
+        inputPath: String,
+        segment: SegmentRangeUs,
+        segmentIndex: Int
+    ): String {
+        var extractor: MediaExtractor? = null
+        var muxer: MediaMuxer? = null
+        var muxerStarted = false
+        var outputFile: File? = null
+        var completed = false
+
+        try {
+            extractor = MediaExtractor().apply { setDataSource(inputPath) }
+
+            val outputDir =
+                applicationContext.getExternalFilesDir(Environment.DIRECTORY_MOVIES)
+                    ?: applicationContext.filesDir
+            outputFile = File(
+                outputDir,
+                "split_${System.currentTimeMillis()}_${segmentIndex}.mp4"
+            )
+
+            muxer = MediaMuxer(
+                outputFile.absolutePath,
+                MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4
+            )
+
+            val trackStates = mutableMapOf<Int, SegmentMuxerTrackState>()
+            var hasVideoTrack = false
+            var bufferCapacity = 1 * 1024 * 1024
+
+            for (trackIndex in 0 until extractor.trackCount) {
+                val format = extractor.getTrackFormat(trackIndex)
+                val mime = format.getString(MediaFormat.KEY_MIME) ?: continue
+                if (!mime.startsWith("video/") && !mime.startsWith("audio/")) continue
+
+                if (mime.startsWith("video/")) {
+                    hasVideoTrack = true
+                }
+
+                extractor.selectTrack(trackIndex)
+                val outputTrackIndex = muxer.addTrack(format)
+                trackStates[trackIndex] = SegmentMuxerTrackState(outputTrackIndex = outputTrackIndex)
+
+                if (format.containsKey(MediaFormat.KEY_MAX_INPUT_SIZE)) {
+                    bufferCapacity = maxOf(
+                        bufferCapacity,
+                        format.getInteger(MediaFormat.KEY_MAX_INPUT_SIZE)
+                    )
+                }
+            }
+
+            if (!hasVideoTrack) {
+                throw IllegalArgumentException("No video track found in $inputPath")
+            }
+            if (trackStates.isEmpty()) {
+                throw IllegalArgumentException("No audio/video tracks available for split operation.")
+            }
+
+            val buffer = ByteBuffer.allocateDirect(bufferCapacity.coerceAtLeast(1 * 1024 * 1024))
+            val bufferInfo = MediaCodec.BufferInfo()
+
+            extractor.seekTo(segment.startUs, MediaExtractor.SEEK_TO_CLOSEST_SYNC)
+            muxer.start()
+            muxerStarted = true
+
+            var samplesWritten = 0
+            while (true) {
+                val sampleTrackIndex = extractor.sampleTrackIndex
+                if (sampleTrackIndex < 0) break
+
+                val sampleTimeUs = extractor.sampleTime
+                if (sampleTimeUs < 0L || sampleTimeUs > segment.endUs) break
+
+                val trackState = trackStates[sampleTrackIndex]
+                if (trackState == null) {
+                    if (!extractor.advance()) break
+                    continue
+                }
+
+                val sampleSize = extractor.readSampleData(buffer, 0)
+                if (sampleSize < 0) break
+
+                if (trackState.firstPtsUs < 0L) {
+                    trackState.firstPtsUs = sampleTimeUs
+                }
+                val normalizedPtsUs = maxOf(0L, sampleTimeUs - trackState.firstPtsUs)
+                val safePtsUs = trackState.mono.nextFrom(normalizedPtsUs)
+
+                buffer.position(0)
+                buffer.limit(sampleSize)
+                bufferInfo.set(0, sampleSize, safePtsUs, extractor.sampleFlags)
+                muxer.writeSampleData(trackState.outputTrackIndex, buffer, bufferInfo)
+                samplesWritten++
+
+                if (!extractor.advance()) break
+            }
+
+            if (samplesWritten == 0) {
+                throw IllegalArgumentException(
+                    "Segment at index $segmentIndex produced no samples. " +
+                        "Try ranges that align with keyframes."
+                )
+            }
+
+            completed = true
+            return outputFile.absolutePath
+        } finally {
+            runCatching { extractor?.release() }
+            if (muxerStarted) {
+                runCatching { muxer?.stop() }
+            }
+            runCatching { muxer?.release() }
+            if (!completed) {
+                runCatching { outputFile?.delete() }
+            }
         }
     }
 

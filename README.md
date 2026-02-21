@@ -9,6 +9,7 @@ High-performance image-and-video processing for React Native powered by [Nitro M
 | `getMediaInfo`         | ✔︎      | ✔︎  | Reads basic metadata (duration, dimensions, type).                        |
 | `convertImageToVideo`  | ✔︎      | ✔︎  | Turns any local file or remote URL into an H.264 MP4 (typically ~30 fps). |
 | `mergeVideos`          | ✔︎      | ✔︎  | Concatenates an arbitrary list of MP4s, normalising size/FPS when needed. |
+| `splitVideo`           | ✔︎      | ✔︎  | Cuts one input video into multiple output clips from requested time ranges. |
 | `watermarkVideo`       | ✔︎      | ✔︎  | Places a text watermark in 4 corners or centre – remote URLs supported.   |
 | Hardware-backed codecs | ✔︎      | ✔︎  | Uses MediaCodec / AVFoundation surfaces for efficient rendering.          |
 | Remote-URL fallback    | ✔︎      | ✔︎  | Automatically downloads HTTP/HTTPS sources to a temp cache.               |
@@ -73,7 +74,12 @@ export type MediaInfoResult = {
   ok: boolean;
 
   /** What operation produced this result */
-  operation: 'getMediaInfo' | 'convert' | 'watermark' | 'merge';
+  operation:
+    | 'getMediaInfo'
+    | 'convertImageToVideo'
+    | 'watermarkVideo'
+    | 'mergeVideos'
+    | 'splitVideo';
 
   /** Media type */
   type: 'image' | 'video';
@@ -83,6 +89,9 @@ export type MediaInfoResult = {
 
   /** Output media (if generated) */
   outputUri?: string;
+
+  /** Output media list (used by splitVideo) */
+  segments?: string[];
 
   /** Core media info (images will only provide width/height) */
   media?: {
@@ -103,7 +112,8 @@ export type MediaInfoResult = {
 Notes:
 
 - For **images**, `durationMs` and `fps` are **omitted** (left `undefined`) — only `width`/`height` are returned.
-- For operations that generate files (`convert`, `watermark`, `merge`), `outputUri` contains the created file path.
+- For operations that generate one file (`convertImageToVideo`, `watermarkVideo`, `mergeVideos`), `outputUri` contains the created file path.
+- For `splitVideo`, `segments` contains the generated file paths in request order.
 
 ## 🗂️ API Reference
 
@@ -137,6 +147,30 @@ Concatenates multiple MP4s into a single file. Videos with mismatched width/heig
 | `videos` | `string[]` | Array of local paths or URLs. |
 
 Returns: `Promise<MediaInfoResult>` — `outputUri` holds the path to the merged file.
+
+### `splitVideo(video: string, segments: Array<{ startMs: number; endMs: number }>): Promise<MediaInfoResult>`
+
+Splits a source video into multiple clips.
+
+| Param      | Type                                      | Description                             |
+| ---------- | ----------------------------------------- | --------------------------------------- |
+| `video`    | `string`                                  | Source MP4 path or URL.                 |
+| `segments` | `Array<{ startMs: number; endMs: number }>` | Segment ranges in milliseconds.         |
+
+Returns: `Promise<MediaInfoResult>` — `segments` contains output paths in the same order as requested.
+
+Example:
+
+```ts
+const result = await splitVideo('/path/to/video.mp4', [
+  { startMs: 0, endMs: 6_000 },
+  { startMs: 10_000, endMs: 18_000 },
+  { startMs: 30_000, endMs: 42_000 },
+]);
+
+if (!result.ok) throw new Error(result.error?.message ?? 'Split failed');
+console.log(result.segments); // ['/.../split_*.mp4', '/.../split_*.mp4', '/.../split_*.mp4']
+```
 
 ### `watermarkVideo(video: string, watermark: string, position: string): Promise<MediaInfoResult>`
 
