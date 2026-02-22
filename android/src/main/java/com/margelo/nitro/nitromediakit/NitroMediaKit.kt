@@ -1079,31 +1079,33 @@ class NitroMediaKit : HybridNitroMediaKitSpec() {
         segment: SegmentRangeUs
     ): Int {
         val primarySeekMode = if (trackInfo.isVideo) {
-            MediaExtractor.SEEK_TO_NEXT_SYNC
+            // Keep requested segment duration by starting from the previous keyframe and
+            // keeping a tiny preroll inside the output timeline.
+            MediaExtractor.SEEK_TO_PREVIOUS_SYNC
         } else {
             MediaExtractor.SEEK_TO_CLOSEST_SYNC
         }
+        val includePrerollSamples = trackInfo.isVideo
         val primaryCount = copySplitTrackSamplesAttempt(
             inputPath = inputPath,
             trackInfo = trackInfo,
             muxer = muxer,
             segment = segment,
             seekMode = primarySeekMode,
-            includeSamplesBeforeSegmentStart = false
+            includeSamplesBeforeSegmentStart = includePrerollSamples
         )
         if (primaryCount > 0 || !trackInfo.isVideo) {
             return primaryCount
         }
 
-        // Some clips have no sync frame inside a short requested window.
-        // Fallback to previous sync so splitting still succeeds.
+        // Rare fallback for malformed tracks where previous-sync seek yields no samples.
         return copySplitTrackSamplesAttempt(
             inputPath = inputPath,
             trackInfo = trackInfo,
             muxer = muxer,
             segment = segment,
-            seekMode = MediaExtractor.SEEK_TO_PREVIOUS_SYNC,
-            includeSamplesBeforeSegmentStart = true
+            seekMode = MediaExtractor.SEEK_TO_NEXT_SYNC,
+            includeSamplesBeforeSegmentStart = false
         )
     }
 
@@ -1119,7 +1121,11 @@ class NitroMediaKit : HybridNitroMediaKitSpec() {
         try {
             extractor.setDataSource(inputPath)
             extractor.selectTrack(trackInfo.sourceTrackIndex)
-            extractor.seekTo(segment.startUs, seekMode)
+            // For zero-start segments, keep the extractor at file start to avoid skipping
+            // the initial GOP when NEXT/PREV seek semantics vary across devices.
+            if (segment.startUs > 0L) {
+                extractor.seekTo(segment.startUs, seekMode)
+            }
 
             val trackFormat = extractor.getTrackFormat(trackInfo.sourceTrackIndex)
             val bufferCapacity = if (trackFormat.containsKey(MediaFormat.KEY_MAX_INPUT_SIZE)) {
@@ -1131,22 +1137,41 @@ class NitroMediaKit : HybridNitroMediaKitSpec() {
             val buffer = ByteBuffer.allocateDirect(bufferCapacity)
             val bufferInfo = MediaCodec.BufferInfo()
             val monoPts = MonotonicPts()
+            val requestedDurationUs = segment.endUs - segment.startUs
+            var sourcePtsBaseUs = segment.startUs
+            var sourceWindowEndUs = segment.endUs
+            var sourceWindowInitialized = false
 
             var samplesWritten = 0
             while (true) {
                 val sampleTimeUs = extractor.sampleTime
                 if (sampleTimeUs < 0L) break
-                if (sampleTimeUs >= segment.endUs) break
 
                 if (!includeSamplesBeforeSegmentStart && sampleTimeUs < segment.startUs) {
                     if (!extractor.advance()) break
                     continue
                 }
 
+                if (!sourceWindowInitialized) {
+                    // Some files start their first readable sample after 0 due edit lists /
+                    // container offsets. Anchor the output timeline to the first kept sample
+                    // so the exported clip still matches the requested duration.
+                    sourcePtsBaseUs = maxOf(segment.startUs, sampleTimeUs)
+                    val maxEndUs = Long.MAX_VALUE - requestedDurationUs
+                    sourceWindowEndUs = if (sourcePtsBaseUs > maxEndUs) {
+                        Long.MAX_VALUE
+                    } else {
+                        sourcePtsBaseUs + requestedDurationUs
+                    }
+                    sourceWindowInitialized = true
+                }
+
+                if (sampleTimeUs >= sourceWindowEndUs) break
+
                 val sampleSize = extractor.readSampleData(buffer, 0)
                 if (sampleSize < 0) break
 
-                val normalizedPtsUs = maxOf(0L, sampleTimeUs - segment.startUs)
+                val normalizedPtsUs = maxOf(0L, sampleTimeUs - sourcePtsBaseUs)
                 val safePtsUs = monoPts.nextFrom(normalizedPtsUs)
 
                 buffer.position(0)
