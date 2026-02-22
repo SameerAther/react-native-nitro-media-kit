@@ -8,7 +8,7 @@ PODS:
   - hermes-engine (0.14.0):
     - hermes-engine/Pre-built (= 0.14.0)
   - hermes-engine/Pre-built (0.14.0)
-  - NitroMediaKit (0.1.0):
+  - NitroMediaKit (0.3.0):
     - boost
     - DoubleConversion
     - fast_float
@@ -2767,7 +2767,7 @@ SPEC CHECKSUMS:
   fmt: a40bb5bd0294ea969aaaba240a927bd33d878cdd
   glog: 5683914934d5b6e4240e497e0f4a3b42d1854183
   hermes-engine: c3b3d50a3ba8aae354e2da5acba01541c2996fb5
-  NitroMediaKit: f8b980a412ee2b3c8c3e674af6624e8e60dc5ecf
+  NitroMediaKit: 99e383d96395b2ec306be43a322ce565d351c595
   NitroModules: 808eee1dfaf75b2c5a63ea3608cb651cc7d13687
   RCT-Folly: 846fda9475e61ec7bcbf8a3fe81edfcaeb090669
   RCTDeprecation: 2b70c6e3abe00396cefd8913efbf6a2db01a2b36
@@ -2841,6 +2841,6 @@ SPEC CHECKSUMS:
   SocketRocket: d4aabe649be1e368d1318fdf28a022d714d65748
   Yoga: 6ca93c8c13f56baeec55eb608577619b17a4d64e
 
-PODFILE CHECKSUM: f0f6606a50ed520218c768dbd3226348ebb7f48d
+PODFILE CHECKSUM: 3ae587f5554051b08d46fd6bfed92549b4297de5
 
 COCOAPODS: 1.15.2

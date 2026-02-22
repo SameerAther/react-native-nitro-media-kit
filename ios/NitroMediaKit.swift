@@ -888,9 +888,11 @@ class NitroMediaKit: HybridNitroMediaKitSpec {
     exporter.outputURL = outputURL
     exporter.outputFileType = fileType
     exporter.shouldOptimizeForNetworkUse = true
+    let startTime = CMTime(seconds: startMs / 1000.0, preferredTimescale: 600)
+    let endTime = CMTime(seconds: endMs / 1000.0, preferredTimescale: 600)
     exporter.timeRange = CMTimeRange(
-      start: CMTime(seconds: startMs / 1000.0, preferredTimescale: 600),
-      end: CMTime(seconds: endMs / 1000.0, preferredTimescale: 600)
+      start: startTime,
+      duration: CMTimeSubtract(endTime, startTime)
     )
 
     try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in

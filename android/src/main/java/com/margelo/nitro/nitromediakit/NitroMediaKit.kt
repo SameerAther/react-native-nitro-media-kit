@@ -145,10 +145,10 @@ class NitroMediaKit : HybridNitroMediaKitSpec() {
         val endUs: Long
     )
 
-    private data class SegmentMuxerTrackState(
+    private data class SegmentTrackInfo(
+        val sourceTrackIndex: Int,
         val outputTrackIndex: Int,
-        val mono: MonotonicPts = MonotonicPts(),
-        var firstPtsUs: Long = -1L
+        val isVideo: Boolean
     )
 
     private fun drainEncoderToMuxer(
@@ -989,14 +989,14 @@ class NitroMediaKit : HybridNitroMediaKitSpec() {
         segment: SegmentRangeUs,
         segmentIndex: Int
     ): String {
-        var extractor: MediaExtractor? = null
+        var formatExtractor: MediaExtractor? = null
         var muxer: MediaMuxer? = null
         var muxerStarted = false
         var outputFile: File? = null
         var completed = false
 
         try {
-            extractor = MediaExtractor().apply { setDataSource(inputPath) }
+            formatExtractor = MediaExtractor().apply { setDataSource(inputPath) }
 
             val outputDir =
                 applicationContext.getExternalFilesDir(Environment.DIRECTORY_MOVIES)
@@ -1011,78 +1011,47 @@ class NitroMediaKit : HybridNitroMediaKitSpec() {
                 MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4
             )
 
-            val trackStates = mutableMapOf<Int, SegmentMuxerTrackState>()
+            val trackInfos = mutableListOf<SegmentTrackInfo>()
             var hasVideoTrack = false
-            var bufferCapacity = 1 * 1024 * 1024
 
-            for (trackIndex in 0 until extractor.trackCount) {
-                val format = extractor.getTrackFormat(trackIndex)
+            for (trackIndex in 0 until formatExtractor.trackCount) {
+                val format = formatExtractor.getTrackFormat(trackIndex)
                 val mime = format.getString(MediaFormat.KEY_MIME) ?: continue
                 if (!mime.startsWith("video/") && !mime.startsWith("audio/")) continue
 
-                if (mime.startsWith("video/")) {
-                    hasVideoTrack = true
-                }
-
-                extractor.selectTrack(trackIndex)
                 val outputTrackIndex = muxer.addTrack(format)
-                trackStates[trackIndex] = SegmentMuxerTrackState(outputTrackIndex = outputTrackIndex)
-
-                if (format.containsKey(MediaFormat.KEY_MAX_INPUT_SIZE)) {
-                    bufferCapacity = maxOf(
-                        bufferCapacity,
-                        format.getInteger(MediaFormat.KEY_MAX_INPUT_SIZE)
+                val isVideo = mime.startsWith("video/")
+                if (isVideo) hasVideoTrack = true
+                trackInfos.add(
+                    SegmentTrackInfo(
+                        sourceTrackIndex = trackIndex,
+                        outputTrackIndex = outputTrackIndex,
+                        isVideo = isVideo
                     )
-                }
+                )
             }
 
             if (!hasVideoTrack) {
                 throw IllegalArgumentException("No video track found in $inputPath")
             }
-            if (trackStates.isEmpty()) {
+            if (trackInfos.isEmpty()) {
                 throw IllegalArgumentException("No audio/video tracks available for split operation.")
             }
 
-            val buffer = ByteBuffer.allocateDirect(bufferCapacity.coerceAtLeast(1 * 1024 * 1024))
-            val bufferInfo = MediaCodec.BufferInfo()
-
-            extractor.seekTo(segment.startUs, MediaExtractor.SEEK_TO_CLOSEST_SYNC)
             muxer.start()
             muxerStarted = true
 
-            var samplesWritten = 0
-            while (true) {
-                val sampleTrackIndex = extractor.sampleTrackIndex
-                if (sampleTrackIndex < 0) break
-
-                val sampleTimeUs = extractor.sampleTime
-                if (sampleTimeUs < 0L || sampleTimeUs > segment.endUs) break
-
-                val trackState = trackStates[sampleTrackIndex]
-                if (trackState == null) {
-                    if (!extractor.advance()) break
-                    continue
-                }
-
-                val sampleSize = extractor.readSampleData(buffer, 0)
-                if (sampleSize < 0) break
-
-                if (trackState.firstPtsUs < 0L) {
-                    trackState.firstPtsUs = sampleTimeUs
-                }
-                val normalizedPtsUs = maxOf(0L, sampleTimeUs - trackState.firstPtsUs)
-                val safePtsUs = trackState.mono.nextFrom(normalizedPtsUs)
-
-                buffer.position(0)
-                buffer.limit(sampleSize)
-                bufferInfo.set(0, sampleSize, safePtsUs, extractor.sampleFlags)
-                muxer.writeSampleData(trackState.outputTrackIndex, buffer, bufferInfo)
-                samplesWritten++
-
-                if (!extractor.advance()) break
+            var totalSamplesWritten = 0
+            for (trackInfo in trackInfos) {
+                totalSamplesWritten += copySplitTrackSamples(
+                    inputPath = inputPath,
+                    trackInfo = trackInfo,
+                    muxer = muxer,
+                    segment = segment
+                )
             }
 
-            if (samplesWritten == 0) {
+            if (totalSamplesWritten == 0) {
                 throw IllegalArgumentException(
                     "Segment at index $segmentIndex produced no samples. " +
                         "Try ranges that align with keyframes."
@@ -1092,7 +1061,7 @@ class NitroMediaKit : HybridNitroMediaKitSpec() {
             completed = true
             return outputFile.absolutePath
         } finally {
-            runCatching { extractor?.release() }
+            runCatching { formatExtractor?.release() }
             if (muxerStarted) {
                 runCatching { muxer?.stop() }
             }
@@ -1100,6 +1069,98 @@ class NitroMediaKit : HybridNitroMediaKitSpec() {
             if (!completed) {
                 runCatching { outputFile?.delete() }
             }
+        }
+    }
+
+    private fun copySplitTrackSamples(
+        inputPath: String,
+        trackInfo: SegmentTrackInfo,
+        muxer: MediaMuxer,
+        segment: SegmentRangeUs
+    ): Int {
+        val primarySeekMode = if (trackInfo.isVideo) {
+            MediaExtractor.SEEK_TO_NEXT_SYNC
+        } else {
+            MediaExtractor.SEEK_TO_CLOSEST_SYNC
+        }
+        val primaryCount = copySplitTrackSamplesAttempt(
+            inputPath = inputPath,
+            trackInfo = trackInfo,
+            muxer = muxer,
+            segment = segment,
+            seekMode = primarySeekMode,
+            includeSamplesBeforeSegmentStart = false
+        )
+        if (primaryCount > 0 || !trackInfo.isVideo) {
+            return primaryCount
+        }
+
+        // Some clips have no sync frame inside a short requested window.
+        // Fallback to previous sync so splitting still succeeds.
+        return copySplitTrackSamplesAttempt(
+            inputPath = inputPath,
+            trackInfo = trackInfo,
+            muxer = muxer,
+            segment = segment,
+            seekMode = MediaExtractor.SEEK_TO_PREVIOUS_SYNC,
+            includeSamplesBeforeSegmentStart = true
+        )
+    }
+
+    private fun copySplitTrackSamplesAttempt(
+        inputPath: String,
+        trackInfo: SegmentTrackInfo,
+        muxer: MediaMuxer,
+        segment: SegmentRangeUs,
+        seekMode: Int,
+        includeSamplesBeforeSegmentStart: Boolean
+    ): Int {
+        val extractor = MediaExtractor()
+        try {
+            extractor.setDataSource(inputPath)
+            extractor.selectTrack(trackInfo.sourceTrackIndex)
+            extractor.seekTo(segment.startUs, seekMode)
+
+            val trackFormat = extractor.getTrackFormat(trackInfo.sourceTrackIndex)
+            val bufferCapacity = if (trackFormat.containsKey(MediaFormat.KEY_MAX_INPUT_SIZE)) {
+                maxOf(trackFormat.getInteger(MediaFormat.KEY_MAX_INPUT_SIZE), 1 * 1024 * 1024)
+            } else {
+                1 * 1024 * 1024
+            }
+
+            val buffer = ByteBuffer.allocateDirect(bufferCapacity)
+            val bufferInfo = MediaCodec.BufferInfo()
+            val monoPts = MonotonicPts()
+
+            var samplesWritten = 0
+            while (true) {
+                val sampleTimeUs = extractor.sampleTime
+                if (sampleTimeUs < 0L) break
+                if (sampleTimeUs >= segment.endUs) break
+
+                if (!includeSamplesBeforeSegmentStart && sampleTimeUs < segment.startUs) {
+                    if (!extractor.advance()) break
+                    continue
+                }
+
+                val sampleSize = extractor.readSampleData(buffer, 0)
+                if (sampleSize < 0) break
+
+                val normalizedPtsUs = maxOf(0L, sampleTimeUs - segment.startUs)
+                val safePtsUs = monoPts.nextFrom(normalizedPtsUs)
+
+                buffer.position(0)
+                buffer.limit(sampleSize)
+                bufferInfo.set(0, sampleSize, safePtsUs, extractor.sampleFlags)
+                muxer.writeSampleData(trackInfo.outputTrackIndex, buffer, bufferInfo)
+                samplesWritten++
+
+                if (!extractor.advance()) break
+            }
+
+            return samplesWritten
+        } finally {
+            extractor.release()
         }
     }
 

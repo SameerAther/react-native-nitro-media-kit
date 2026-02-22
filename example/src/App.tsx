@@ -70,12 +70,11 @@ export default function App() {
       const result = await splitVideo(
         'https://www.pexels.com/download/video/4114797/?fps=25.0&h=240&w=426',
         [
-          { startMs: 0, endMs: 2_000 },
-          { startMs: 2_000, endMs: 4_000 },
-          { startMs: 4_000, endMs: 6_000 },
+          { startMs: 0, endMs: 4_000 },
+          { startMs: 2_000, endMs: 6_000 },
         ]
       );
-
+      console.log('Split result:', result);
       if (!result.ok) {
         Alert.alert('Error', result.error?.message ?? 'Failed to split video');
         return;
