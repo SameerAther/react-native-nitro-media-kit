@@ -9,22 +9,49 @@
 /* Begin PBXBuildFile section */
 		0C80B921A6F3F58F76C31292 /* libPods-NitroMediaKitExample.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 5DCACB8F33CDC322A6C60F78 /* libPods-NitroMediaKitExample.a */; };
 		13B07FBF1A68108700A75B9A /* Images.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 13B07FB51A68108700A75B9A /* Images.xcassets */; };
+		282D4A3BADD62565F8FDAED4 /* landscape.mp4 in Resources */ = {isa = PBXBuildFile; fileRef = F262B08777DD95BCDA9E4AB6 /* landscape.mp4 */; };
 		761780ED2CA45674006654EE /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 761780EC2CA45674006654EE /* AppDelegate.swift */; };
 		81AB9BB82411601600AC10FF /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 81AB9BB72411601600AC10FF /* LaunchScreen.storyboard */; };
+		9C4F6CA940B464C7BDBA69BC /* portrait.mp4 in Resources */ = {isa = PBXBuildFile; fileRef = 51D04954D9C1F7662F904982 /* portrait.mp4 */; };
+		B7A230AFBFCDE29A00F088C3 /* libPods-NitroMediaKitTests.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 1D5FE256AE983A3D375FC24C /* libPods-NitroMediaKitTests.a */; };
+		C2D2580D54556357F5EE7DEC /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 7EAB7D975557F71661EFDEBF /* Foundation.framework */; };
 		D59D67924DBC533BB75AFEC9 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 13B07FB81A68108700A75B9A /* PrivacyInfo.xcprivacy */; };
+		EE4BDA35D4F4FD14F1842F21 /* MediaPipelineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA23859668ACFCC6A694120F /* MediaPipelineTests.swift */; };
+		F950CBC802D603401C559CB1 /* photo.png in Resources */ = {isa = PBXBuildFile; fileRef = D9E7BBED548ACF591528AD89 /* photo.png */; };
 /* End PBXBuildFile section */
 
+/* Begin PBXContainerItemProxy section */
+		EEFE05392E134A9888FB6C9D /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 83CBB9F71A601CBA00E9B192 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 13B07F861A680F5B00A75B9A;
+			remoteInfo = NitroMediaKitExample;
+		};
+/* End PBXContainerItemProxy section */
+
 /* Begin PBXFileReference section */
+		07152C9A158DC2D6F320E411 /* Pods-NitroMediaKitTests.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-NitroMediaKitTests.release.xcconfig"; path = "Target Support Files/Pods-NitroMediaKitTests/Pods-NitroMediaKitTests.release.xcconfig"; sourceTree = "<group>"; };
 		13B07F961A680F5B00A75B9A /* NitroMediaKitExample.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = NitroMediaKitExample.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		13B07FB51A68108700A75B9A /* Images.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; name = Images.xcassets; path = NitroMediaKitExample/Images.xcassets; sourceTree = "<group>"; };
 		13B07FB61A68108700A75B9A /* Info.plist */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.xml; name = Info.plist; path = NitroMediaKitExample/Info.plist; sourceTree = "<group>"; };
 		13B07FB81A68108700A75B9A /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.xml; name = PrivacyInfo.xcprivacy; path = NitroMediaKitExample/PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
+		18324772006F744106645278 /* Pods-NitroMediaKitExample-NitroMediaKitTests.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-NitroMediaKitExample-NitroMediaKitTests.release.xcconfig"; path = "Target Support Files/Pods-NitroMediaKitExample-NitroMediaKitTests/Pods-NitroMediaKitExample-NitroMediaKitTests.release.xcconfig"; sourceTree = "<group>"; };
+		1D5FE256AE983A3D375FC24C /* libPods-NitroMediaKitTests.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = "libPods-NitroMediaKitTests.a"; sourceTree = BUILT_PRODUCTS_DIR; };
 		3B4392A12AC88292D35C810B /* Pods-NitroMediaKitExample.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-NitroMediaKitExample.debug.xcconfig"; path = "Target Support Files/Pods-NitroMediaKitExample/Pods-NitroMediaKitExample.debug.xcconfig"; sourceTree = "<group>"; };
+		506B41C2B89A9B87D27624F4 /* Pods-NitroMediaKitTests.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-NitroMediaKitTests.debug.xcconfig"; path = "Target Support Files/Pods-NitroMediaKitTests/Pods-NitroMediaKitTests.debug.xcconfig"; sourceTree = "<group>"; };
+		51D04954D9C1F7662F904982 /* portrait.mp4 */ = {isa = PBXFileReference; includeInIndex = 1; path = portrait.mp4; sourceTree = "<group>"; };
 		5709B34CF0A7D63546082F79 /* Pods-NitroMediaKitExample.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-NitroMediaKitExample.release.xcconfig"; path = "Target Support Files/Pods-NitroMediaKitExample/Pods-NitroMediaKitExample.release.xcconfig"; sourceTree = "<group>"; };
 		5DCACB8F33CDC322A6C60F78 /* libPods-NitroMediaKitExample.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = "libPods-NitroMediaKitExample.a"; sourceTree = BUILT_PRODUCTS_DIR; };
 		761780EC2CA45674006654EE /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = AppDelegate.swift; path = NitroMediaKitExample/AppDelegate.swift; sourceTree = "<group>"; };
+		7EAB7D975557F71661EFDEBF /* Foundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Foundation.framework; path = Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS18.0.sdk/System/Library/Frameworks/Foundation.framework; sourceTree = DEVELOPER_DIR; };
 		81AB9BB72411601600AC10FF /* LaunchScreen.storyboard */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = file.storyboard; name = LaunchScreen.storyboard; path = NitroMediaKitExample/LaunchScreen.storyboard; sourceTree = "<group>"; };
+		C7B30E6E6846D5474824D90F /* NitroMediaKitTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = NitroMediaKitTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		D204892F8B37325E56532BBE /* Pods-NitroMediaKitExample-NitroMediaKitTests.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-NitroMediaKitExample-NitroMediaKitTests.debug.xcconfig"; path = "Target Support Files/Pods-NitroMediaKitExample-NitroMediaKitTests/Pods-NitroMediaKitExample-NitroMediaKitTests.debug.xcconfig"; sourceTree = "<group>"; };
+		D9E7BBED548ACF591528AD89 /* photo.png */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = image.png; path = photo.png; sourceTree = "<group>"; };
 		ED297162215061F000B7C4FE /* JavaScriptCore.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = JavaScriptCore.framework; path = System/Library/Frameworks/JavaScriptCore.framework; sourceTree = SDKROOT; };
+		F262B08777DD95BCDA9E4AB6 /* landscape.mp4 */ = {isa = PBXFileReference; includeInIndex = 1; path = landscape.mp4; sourceTree = "<group>"; };
+		FA23859668ACFCC6A694120F /* MediaPipelineTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MediaPipelineTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -33,6 +60,15 @@
 			buildActionMask = 2147483647;
 			files = (
 				0C80B921A6F3F58F76C31292 /* libPods-NitroMediaKitExample.a in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		A2BE8BE83DC4B1CAB1B4A6AA /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				C2D2580D54556357F5EE7DEC /* Foundation.framework in Frameworks */,
+				B7A230AFBFCDE29A00F088C3 /* libPods-NitroMediaKitTests.a in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -56,8 +92,38 @@
 			children = (
 				ED297162215061F000B7C4FE /* JavaScriptCore.framework */,
 				5DCACB8F33CDC322A6C60F78 /* libPods-NitroMediaKitExample.a */,
+				6F969E9FC4D3B447A5B39360 /* iOS */,
+				1D5FE256AE983A3D375FC24C /* libPods-NitroMediaKitTests.a */,
 			);
 			name = Frameworks;
+			sourceTree = "<group>";
+		};
+		2E27F572AA5A456A13C0DBBD /* NitroMediaKitTests */ = {
+			isa = PBXGroup;
+			children = (
+				FA23859668ACFCC6A694120F /* MediaPipelineTests.swift */,
+			);
+			name = NitroMediaKitTests;
+			path = NitroMediaKitTests;
+			sourceTree = "<group>";
+		};
+		6ADF5D2F90D85C1DF374CA5F /* Test Fixtures */ = {
+			isa = PBXGroup;
+			children = (
+				F262B08777DD95BCDA9E4AB6 /* landscape.mp4 */,
+				51D04954D9C1F7662F904982 /* portrait.mp4 */,
+				D9E7BBED548ACF591528AD89 /* photo.png */,
+			);
+			name = "Test Fixtures";
+			path = "../../test-fixtures";
+			sourceTree = "<group>";
+		};
+		6F969E9FC4D3B447A5B39360 /* iOS */ = {
+			isa = PBXGroup;
+			children = (
+				7EAB7D975557F71661EFDEBF /* Foundation.framework */,
+			);
+			name = iOS;
 			sourceTree = "<group>";
 		};
 		832341AE1AAA6A7D00B99B32 /* Libraries */ = {
@@ -75,6 +141,8 @@
 				83CBBA001A601CBA00E9B192 /* Products */,
 				2D16E6871FA4F8E400B85C8A /* Frameworks */,
 				BBD78D7AC51CEA395F1C20DB /* Pods */,
+				2E27F572AA5A456A13C0DBBD /* NitroMediaKitTests */,
+				6ADF5D2F90D85C1DF374CA5F /* Test Fixtures */,
 			);
 			indentWidth = 2;
 			sourceTree = "<group>";
@@ -85,6 +153,7 @@
 			isa = PBXGroup;
 			children = (
 				13B07F961A680F5B00A75B9A /* NitroMediaKitExample.app */,
+				C7B30E6E6846D5474824D90F /* NitroMediaKitTests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -94,6 +163,10 @@
 			children = (
 				3B4392A12AC88292D35C810B /* Pods-NitroMediaKitExample.debug.xcconfig */,
 				5709B34CF0A7D63546082F79 /* Pods-NitroMediaKitExample.release.xcconfig */,
+				18324772006F744106645278 /* Pods-NitroMediaKitExample-NitroMediaKitTests.release.xcconfig */,
+				D204892F8B37325E56532BBE /* Pods-NitroMediaKitExample-NitroMediaKitTests.debug.xcconfig */,
+				07152C9A158DC2D6F320E411 /* Pods-NitroMediaKitTests.release.xcconfig */,
+				506B41C2B89A9B87D27624F4 /* Pods-NitroMediaKitTests.debug.xcconfig */,
 			);
 			path = Pods;
 			sourceTree = "<group>";
@@ -122,6 +195,25 @@
 			productReference = 13B07F961A680F5B00A75B9A /* NitroMediaKitExample.app */;
 			productType = "com.apple.product-type.application";
 		};
+		A717D0DF1BB709CF4E90D667 /* NitroMediaKitTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = ADF46200CEF182510EE0C141 /* Build configuration list for PBXNativeTarget "NitroMediaKitTests" */;
+			buildPhases = (
+				F4D52A31B6CD9C058784CC07 /* [CP] Check Pods Manifest.lock */,
+				801CD7E7AE034B97163EBA02 /* Sources */,
+				A2BE8BE83DC4B1CAB1B4A6AA /* Frameworks */,
+				EF7D12BB460006021FBF93ED /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				52EBDE9402FFE4696AE857D4 /* PBXTargetDependency */,
+			);
+			name = NitroMediaKitTests;
+			productName = NitroMediaKitTests;
+			productReference = C7B30E6E6846D5474824D90F /* NitroMediaKitTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -149,6 +241,7 @@
 			projectRoot = "";
 			targets = (
 				13B07F861A680F5B00A75B9A /* NitroMediaKitExample */,
+				A717D0DF1BB709CF4E90D667 /* NitroMediaKitTests */,
 			);
 		};
 /* End PBXProject section */
@@ -161,6 +254,16 @@
 				81AB9BB82411601600AC10FF /* LaunchScreen.storyboard in Resources */,
 				13B07FBF1A68108700A75B9A /* Images.xcassets in Resources */,
 				D59D67924DBC533BB75AFEC9 /* PrivacyInfo.xcprivacy in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		EF7D12BB460006021FBF93ED /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				282D4A3BADD62565F8FDAED4 /* landscape.mp4 in Resources */,
+				9C4F6CA940B464C7BDBA69BC /* portrait.mp4 in Resources */,
+				F950CBC802D603401C559CB1 /* photo.png in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -239,6 +342,28 @@
 			shellScript = "\"${PODS_ROOT}/Target Support Files/Pods-NitroMediaKitExample/Pods-NitroMediaKitExample-resources.sh\"\n";
 			showEnvVarsInLog = 0;
 		};
+		F4D52A31B6CD9C058784CC07 /* [CP] Check Pods Manifest.lock */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+				"${PODS_PODFILE_DIR_PATH}/Podfile.lock",
+				"${PODS_ROOT}/Manifest.lock",
+			);
+			name = "[CP] Check Pods Manifest.lock";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+				"$(DERIVED_FILE_DIR)/Pods-NitroMediaKitTests-checkManifestLockResult.txt",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "diff \"${PODS_PODFILE_DIR_PATH}/Podfile.lock\" \"${PODS_ROOT}/Manifest.lock\" > /dev/null\nif [ $? != 0 ] ; then\n    # print error to STDERR\n    echo \"error: The sandbox is not in sync with the Podfile.lock. Run 'pod install' or update your CocoaPods installation.\" >&2\n    exit 1\nfi\n# This output is used by Xcode 'outputs' to avoid re-running this script phase.\necho \"SUCCESS\" > \"${SCRIPT_OUTPUT_FILE_0}\"\n";
+			showEnvVarsInLog = 0;
+		};
 /* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
@@ -250,7 +375,24 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		801CD7E7AE034B97163EBA02 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				EE4BDA35D4F4FD14F1842F21 /* MediaPipelineTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		52EBDE9402FFE4696AE857D4 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			name = NitroMediaKitExample;
+			target = 13B07F861A680F5B00A75B9A /* NitroMediaKitExample */;
+			targetProxy = EEFE05392E134A9888FB6C9D /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
 		13B07F941A680F5B00A75B9A /* Debug */ = {
@@ -262,7 +404,7 @@
 				CURRENT_PROJECT_VERSION = 1;
 				ENABLE_BITCODE = NO;
 				INFOPLIST_FILE = NitroMediaKitExample/Info.plist;
-				IPHONEOS_DEPLOYMENT_TARGET = 15.1;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -289,7 +431,7 @@
 				CLANG_ENABLE_MODULES = YES;
 				CURRENT_PROJECT_VERSION = 1;
 				INFOPLIST_FILE = NitroMediaKitExample/Info.plist;
-				IPHONEOS_DEPLOYMENT_TARGET = 15.1;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -306,6 +448,28 @@
 				VERSIONING_SYSTEM = "apple-generic";
 			};
 			name = Release;
+		};
+		233D66600B150E0528CD9951 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = 506B41C2B89A9B87D27624F4 /* Pods-NitroMediaKitTests.debug.xcconfig */;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CLANG_CXX_LANGUAGE_STANDARD = "$(inherited)";
+				CLANG_ENABLE_OBJC_WEAK = NO;
+				GENERATE_INFOPLIST_FILE = YES;
+				HEADER_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(PODS_ROOT)/Headers/Private/NitroModules",
+				);
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.nitromediakit.tests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_OBJC_INTEROP_MODE = objcxx;
+				SWIFT_VERSION = 5.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/NitroMediaKitExample.app/NitroMediaKitExample";
+			};
+			name = Debug;
 		};
 		83CBBA201A601CBA00E9B192 /* Debug */ = {
 			isa = XCBuildConfiguration;
@@ -453,6 +617,29 @@
 			};
 			name = Release;
 		};
+		C98A74D50BC14636F92672A7 /* Release */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = 07152C9A158DC2D6F320E411 /* Pods-NitroMediaKitTests.release.xcconfig */;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CLANG_CXX_LANGUAGE_STANDARD = "$(inherited)";
+				CLANG_ENABLE_OBJC_WEAK = NO;
+				GENERATE_INFOPLIST_FILE = YES;
+				HEADER_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(PODS_ROOT)/Headers/Private/NitroModules",
+				);
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.nitromediakit.tests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_OBJC_INTEROP_MODE = objcxx;
+				SWIFT_VERSION = 5.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/NitroMediaKitExample.app/NitroMediaKitExample";
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -470,6 +657,15 @@
 			buildConfigurations = (
 				83CBBA201A601CBA00E9B192 /* Debug */,
 				83CBBA211A601CBA00E9B192 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		ADF46200CEF182510EE0C141 /* Build configuration list for PBXNativeTarget "NitroMediaKitTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				C98A74D50BC14636F92672A7 /* Release */,
+				233D66600B150E0528CD9951 /* Debug */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

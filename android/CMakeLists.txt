@@ -1,5 +1,5 @@
+cmake_minimum_required(VERSION 3.22.1)
 project(nitromediakit)
-cmake_minimum_required(VERSION 3.9.0)
 
 set(PACKAGE_NAME nitromediakit)
 set(CMAKE_VERBOSE_MAKEFILE ON)

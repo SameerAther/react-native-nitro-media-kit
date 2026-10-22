@@ -27,6 +27,12 @@ target 'NitroMediaKitExample' do
     :app_path => "#{Pod::Config.instance.installation_root}/.."
   )
 
+  target 'NitroMediaKitTests' do
+    # Resolve native symbols from TEST_HOST. Relinking the app's static pods
+    # would run Nitro's HybridObject registration twice in the same process.
+    inherit! :search_paths
+  end
+
   post_install do |installer|
     react_native_post_install(
       installer,
@@ -34,6 +40,25 @@ target 'NitroMediaKitExample' do
       :mac_catalyst_enabled => false
       # :ccache_enabled => true
     )
+
+    # glog 0.3.5 includes these headers inside namespace google. Mark them
+    # textual so Swift C++ interop does not turn those includes into illegal
+    # nested module imports. This changes the module map, not third-party code.
+    glog_modulemap = installer.sandbox.root.join('Target Support Files/glog/glog.modulemap')
+    glog_target = installer.pod_targets.find { |target| target.pod_name == 'glog' }
+    if glog_target&.root_spec&.version.to_s == '0.3.5' && glog_modulemap.exist?
+      File.write(glog_modulemap, <<~MODULEMAP)
+        module glog {
+          umbrella header "glog-umbrella.h"
+          textual header "glog/logging.h"
+          textual header "glog/log_severity.h"
+          textual header "glog/raw_logging.h"
+          textual header "glog/stl_logging.h"
+          textual header "glog/vlog_is_on.h"
+          export *
+        }
+      MODULEMAP
+    end
 
     installer.pods_project.targets.each do |t|
       t.build_configurations.each do |config|

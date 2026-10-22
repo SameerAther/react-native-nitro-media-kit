@@ -112,7 +112,7 @@ jobs:
   build-ios:
     runs-on: macos-15
     env:
-      XCODE_VERSION: '16.1'
+      XCODE_VERSION: '26.2'
       TURBO_CACHE_DIR: .turbo/ios
     steps:
       - name: Checkout
@@ -156,12 +156,37 @@ jobs:
       - name: Install CocoaPods deps
         run: |
           set -euo pipefail
-          cd example
-          bundle exec pod install --project-directory=ios --repo-update
+          cd example/ios
+          bundle exec pod install
 
-      # Key part: force a destination that doesn't require iOS 18.2 runtime resolution
-      - name: Build example for iOS
-        env:
-          XCODE_XCCONFIG_FILE: ''
+      - name: Run native media regression tests
         run: |
-          yarn turbo run build:ios --cache-dir="${{ env.TURBO_CACHE_DIR }}"
+          set -euo pipefail
+          DEVICE_ID=$(xcrun simctl list devices available -j | python3 -c 'import json,sys; devices=json.load(sys.stdin)["devices"]; print(next(d["udid"] for group in devices.values() for d in group if d.get("isAvailable")))')
+          yarn test:native:ios -destination "platform=iOS Simulator,id=$DEVICE_ID" -jobs 2 CODE_SIGNING_ALLOWED=NO
+
+  test-android-media:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - uses: ./.github/actions/setup
+      - name: Generate Nitro bindings
+        run: yarn nitrogen
+      - uses: actions/setup-java@c5195efecf7bdfc987ee8bae7a71cb8b11521c00
+        with:
+          distribution: zulu
+          java-version: '17'
+      - name: Enable KVM access
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Run native media regression tests
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          arch: x86_64
+          target: google_apis
+          profile: pixel_2
+          disable-animations: true
+          script: yarn test:native:android --no-daemon --max-workers=2 -PreactNativeArchitectures=x86_64

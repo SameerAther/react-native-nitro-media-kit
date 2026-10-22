@@ -4,10 +4,57 @@ export type MediaType = 'image' | 'video';
 
 export type OperationType =
   | 'getMediaInfo'
+  | 'compressMedia'
   | 'convertImageToVideo'
   | 'watermarkVideo'
   | 'mergeVideos'
-  | 'splitVideo';
+  | 'splitVideo'
+  | 'trimVideo'
+  | 'removeAudio'
+  | 'extractThumbnail';
+
+export type WatermarkPosition =
+  'top-left' | 'top-right' | 'bottom-left' | 'bottom-right' | 'center';
+
+/** Sizes are in output pixels. Long text wraps inside the video bounds. */
+export type WatermarkOptions = {
+  position?: WatermarkPosition;
+  fontSize?: number;
+  /** #RRGGBB or #RRGGBBAA. Default: white. */
+  color?: string;
+  opacity?: number;
+  margin?: number;
+};
+
+export type ThumbnailOptions = {
+  timeMs?: number;
+  maxLongEdge?: number;
+  quality?: number;
+};
+
+export type CompressionPreset = 'auto' | 'high' | 'balanced' | 'small';
+export type CompressImageFormat = 'auto' | 'jpeg' | 'png';
+
+export type CompressImageOptions = {
+  format?: CompressImageFormat;
+  quality?: number;
+  maxLongEdge?: number;
+};
+
+export type CompressVideoOptions = {
+  maxLongEdge?: number;
+  maxFps?: number;
+  videoBitrateKbps?: number;
+  audioBitrateKbps?: number;
+  keepAudio?: boolean;
+};
+
+export type CompressMediaOptions = {
+  preset?: CompressionPreset;
+  preserveMetadata?: boolean;
+  image?: CompressImageOptions;
+  video?: CompressVideoOptions;
+};
 
 export type VideoSegment = {
   startMs: number;
@@ -53,12 +100,15 @@ export type MediaInfoResult = {
   error?: MediaInfoError;
 };
 
-export interface NitroMediaKit
-  extends HybridObject<{
-    ios: 'swift';
-    android: 'kotlin';
-  }> {
+export interface NitroMediaKit extends HybridObject<{
+  ios: 'swift';
+  android: 'kotlin';
+}> {
   getMediaInfo(inputUri: string): Promise<MediaInfoResult>;
+  compressMedia(
+    inputUri: string,
+    options?: CompressMediaOptions
+  ): Promise<MediaInfoResult>;
   convertImageToVideo(
     image: string,
     duration: number
@@ -68,6 +118,14 @@ export interface NitroMediaKit
   watermarkVideo(
     video: string,
     watermark: string,
-    position: string
+    options?: WatermarkOptions
   ): Promise<MediaInfoResult>;
+  trimVideo(video: string, segment: VideoSegment): Promise<MediaInfoResult>;
+  removeAudio(video: string): Promise<MediaInfoResult>;
+  extractThumbnail(
+    video: string,
+    options?: ThumbnailOptions
+  ): Promise<MediaInfoResult>;
+  /** Deletes only a file created by this library. Returns false if already absent. */
+  deleteGeneratedFile(uri: string): Promise<boolean>;
 }

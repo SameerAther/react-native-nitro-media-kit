@@ -14,6 +14,13 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     _ application: UIApplication,
     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
   ) -> Bool {
+    // Native media tests run without Metro or a JavaScript bridge.
+    if ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil {
+      window = UIWindow(frame: UIScreen.main.bounds)
+      window?.rootViewController = UIViewController()
+      window?.makeKeyAndVisible()
+      return true
+    }
     let delegate = ReactNativeDelegate()
     let factory = RCTReactNativeFactory(delegate: delegate)
     delegate.dependencyProvider = RCTAppDependencyProvider()
