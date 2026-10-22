@@ -6,16 +6,16 @@ import { defineConfig } from 'eslint/config';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+const configDirectory = path.dirname(fileURLToPath(import.meta.url));
 const compat = new FlatCompat({
-  baseDirectory: __dirname,
+  baseDirectory: configDirectory,
   recommendedConfig: js.configs.recommended,
   allConfig: js.configs.all,
 });
 
 export default defineConfig([
   {
+    files: ['**/*.{js,ts,tsx}'],
     extends: fixupConfigRules(compat.extends('@react-native', 'prettier')),
     plugins: { prettier },
     rules: {

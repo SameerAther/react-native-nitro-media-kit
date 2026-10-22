@@ -32,9 +32,9 @@
             skipped = "NO">
             <BuildableReference
                BuildableIdentifier = "primary"
-               BlueprintIdentifier = "00E356ED1AD99517003FC87E"
-               BuildableName = "NitroMediaKitExampleTests.xctest"
-               BlueprintName = "NitroMediaKitExampleTests"
+               BlueprintIdentifier = "A717D0DF1BB709CF4E90D667"
+               BuildableName = "NitroMediaKitTests.xctest"
+               BlueprintName = "NitroMediaKitTests"
                ReferencedContainer = "container:NitroMediaKitExample.xcodeproj">
             </BuildableReference>
          </TestableReference>

@@ -1,39 +1,361 @@
 package com.margelo.nitro.nitromediakit
 
-import kotlin.math.PI
+import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
-import android.media.*
-import android.os.Environment
-import android.opengl.*
-import com.margelo.nitro.core.Promise
-import com.margelo.nitro.NitroModules
-import java.io.File
-import java.io.IOException
-import kotlinx.coroutines.*
-import java.io.FileOutputStream
-import java.net.HttpURLConnection
-import java.net.URL
-import android.util.Log
-import android.media.MediaCodecInfo.VideoCapabilities
-import android.util.Range
-import com.margelo.nitro.core.ArrayBuffer
-import java.nio.ByteBuffer
-import android.view.Surface
-import android.graphics.SurfaceTexture
-import android.graphics.Color
+import android.graphics.Canvas
+import android.graphics.Matrix
+import android.graphics.Paint
+import android.media.MediaExtractor
+import android.media.MediaFormat
+import android.media.MediaMetadataRetriever
+import android.net.Uri
+import android.os.Looper
+import android.text.Layout
+import android.text.StaticLayout
+import android.text.TextPaint
+import android.webkit.MimeTypeMap
+import androidx.exifinterface.media.ExifInterface
+import androidx.media3.common.MediaItem
+import androidx.media3.common.MimeTypes
+import androidx.media3.datasource.DataSourceBitmapLoader
+import androidx.media3.effect.BitmapOverlay
+import androidx.media3.effect.FrameDropEffect
+import androidx.media3.effect.OverlayEffect
+import androidx.media3.effect.Presentation
+import androidx.media3.effect.TextureOverlay
+import androidx.media3.effect.StaticOverlaySettings
+import androidx.media3.transformer.AudioEncoderSettings
+import androidx.media3.transformer.Composition
+import androidx.media3.transformer.DefaultAssetLoaderFactory
+import androidx.media3.transformer.DefaultEncoderFactory
+import androidx.media3.transformer.EditedMediaItem
+import androidx.media3.transformer.EditedMediaItemSequence
+import androidx.media3.transformer.Effects
+import androidx.media3.transformer.ExportException
+import androidx.media3.transformer.ExportResult
+import androidx.media3.transformer.Transformer
+import androidx.media3.transformer.VideoEncoderSettings
+import com.google.common.util.concurrent.MoreExecutors
 import com.facebook.proguard.annotations.DoNotStrip
+import com.margelo.nitro.NitroModules
+import com.margelo.nitro.core.Promise
+import java.io.File
+import java.io.FileOutputStream
+import java.io.IOException
+import java.util.concurrent.Executors
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
+import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
+import kotlin.math.roundToInt
 
+/** No codecs, bitmaps, Surfaces or per-call buffers survive an operation. */
+@android.annotation.SuppressLint("UnsafeOptInUsageError")
 @DoNotStrip
-class NitroMediaKit : HybridNitroMediaKitSpec() {
-    override val memorySize: Long
-        get() = 0L
+class NitroMediaKit constructor(private val applicationContext: Context) : HybridNitroMediaKitSpec() {
+    constructor() : this(requireNotNull(NitroModules.applicationContext))
 
-    // Obtain application context from NitroModules
-    private val applicationContext = NitroModules.applicationContext
-        ?: throw IllegalStateException("Application context is null")
+    private fun execute(
+        operation: OperationType,
+        input: String?,
+        type: MediaType = MediaType.VIDEO,
+        block: suspend (MediaJob) -> MediaInfoResult
+    ): Promise<MediaInfoResult> = Promise.async(ioScope) {
+        workMutex.withLock {
+            val job = MediaJob(applicationContext)
+            var success = false
+            try {
+                block(job).also { success = it.ok }
+            } catch (error: Exception) {
+                makeErrorResult(operation, type, input, error = error)
+            } finally {
+                job.finish(success)
+            }
+        }
+    }
 
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    override fun getMediaInfo(inputUri: String): Promise<MediaInfoResult> =
+        execute(OperationType.GETMEDIAINFO, inputUri) { job ->
+            val file = job.resolve(inputUri)
+            val (type, media) = inspect(file)
+            makeResult(true, OperationType.GETMEDIAINFO, type, inputUri, media = media)
+        }
+
+    private fun inspect(file: File): Pair<MediaType, MediaInfoMedia> {
+        val image = detectImageInfo(file.path)
+        if (image != null) return MediaType.IMAGE to MediaInfoMedia(
+            durationMs = null, width = image.displayWidth.toDouble(), height = image.displayHeight.toDouble(),
+            fps = null, format = image.extension, sizeBytes = file.length().toDouble(), audioTracks = 0.0, videoTracks = 0.0
+        )
+        val info = detectVideoInfo(file.path)
+        return MediaType.VIDEO to MediaInfoMedia(
+            durationMs = info.durationMs, width = info.displayWidth.toDouble(), height = info.displayHeight.toDouble(),
+            fps = info.fps, format = file.extension, sizeBytes = file.length().toDouble(),
+            audioTracks = info.audioTracks.toDouble(), videoTracks = 1.0
+        )
+    }
+
+    private fun outputResult(operation: OperationType, input: String?, file: File, warnings: Array<MediaInfoWarning>? = null): MediaInfoResult {
+        val (type, media) = inspect(file)
+        return makeResult(true, operation, type, input, file.path, media = media, warnings = warnings)
+    }
+
+    override fun compressMedia(inputUri: String, options: CompressMediaOptions?): Promise<MediaInfoResult> =
+        execute(OperationType.COMPRESSMEDIA, inputUri) { job ->
+            val file = job.resolve(inputUri)
+            val resolved = resolveCompressOptions(options)
+            val image = detectImageInfo(file.path)
+            if (image != null) {
+                compressImage(inputUri, file.path, image, resolved, job)
+            } else {
+                val info = detectVideoInfo(file.path)
+                val plan = resolveVideoCompressionPlan(info, resolved)
+                val (width, height) = computeScaledDimensions(info.displayWidth, info.displayHeight, plan.maxLongEdge)
+                val effects = listOf(
+                    Presentation.createForWidthAndHeight(width.coerceAtLeast(2) / 2 * 2, height.coerceAtLeast(2) / 2 * 2, Presentation.LAYOUT_SCALE_TO_FIT),
+                    FrameDropEffect.createDefaultFrameDropEffect(minOf(plan.maxFps.toDouble(), info.fps).toFloat())
+                )
+                val item = EditedMediaItem.Builder(MediaItem.fromUri(Uri.fromFile(file)))
+                    .setRemoveAudio(!plan.keepAudio).setEffects(Effects(emptyList(), effects)).build()
+                val output = job.output("mp4")
+                transform(listOf(item), output, plan.videoBitrateKbps, plan.audioBitrateKbps, includeAudio = plan.keepAudio && info.audioTracks > 0, preserveMetadata = resolved.preserveMetadata)
+                val warnings = mutableListOf<MediaInfoWarning>()
+                if (resolved.preserveMetadata) warnings.add(warning("METADATA_PRESERVE_PARTIAL", "Only metadata supported by the device MP4 muxer is retained."))
+                if (output.length() >= file.length()) warnings.add(warning("LIMITED_SAVINGS", "Output is not smaller than the source; reduce size or bitrate for more savings."))
+                outputResult(OperationType.COMPRESSMEDIA, inputUri, output, warnings.takeIf { it.isNotEmpty() }?.toTypedArray())
+            }
+        }
+
+    override fun convertImageToVideo(image: String, duration: Double): Promise<MediaInfoResult> =
+        execute(OperationType.CONVERTIMAGETOVIDEO, image) { job ->
+            require(duration.isFinite() && duration > 0 && duration <= 86_400) { "Duration must be in (0, 86400] seconds." }
+            val input = job.resolve(image)
+            val info = detectImageInfo(input.path) ?: throw UnsupportedMediaException("Input must be an image.")
+            val (width, height) = computeScaledDimensions(info.displayWidth, info.displayHeight, 1920)
+            val item = EditedMediaItem.Builder(MediaItem.Builder().setUri(Uri.fromFile(input)).setImageDurationMs((duration * 1000).roundToInt().toLong().coerceAtLeast(1)).build())
+                .setFrameRate(30)
+                .setEffects(Effects(emptyList(), listOf(Presentation.createForWidthAndHeight(width.coerceAtLeast(2) / 2 * 2, height.coerceAtLeast(2) / 2 * 2, Presentation.LAYOUT_SCALE_TO_FIT))))
+                .build()
+            val output = job.output("mp4")
+            transform(listOf(item), output)
+            outputResult(OperationType.CONVERTIMAGETOVIDEO, image, output)
+        }
+
+    override fun mergeVideos(videos: Array<String>): Promise<MediaInfoResult> =
+        execute(OperationType.MERGEVIDEOS, videos.firstOrNull()) { job ->
+            require(videos.isNotEmpty()) { "At least one video is required." }
+            val files = videos.map { job.resolve(it) }
+            val infos = files.map { detectVideoInfo(it.path) }
+            val first = infos.first()
+            val (width, height) = computeScaledDimensions(first.displayWidth, first.displayHeight, 1920)
+            val presentation = Presentation.createForWidthAndHeight(width.coerceAtLeast(2) / 2 * 2, height.coerceAtLeast(2) / 2 * 2, Presentation.LAYOUT_SCALE_TO_FIT)
+            val items = files.map { file ->
+                EditedMediaItem.Builder(MediaItem.fromUri(Uri.fromFile(file)))
+                    .setEffects(Effects(emptyList(), listOf(presentation))).build()
+            }
+            val output = job.output("mp4")
+            transform(items, output, includeAudio = infos.any { it.audioTracks > 0 })
+            outputResult(OperationType.MERGEVIDEOS, videos.first(), output)
+        }
+
+    override fun splitVideo(video: String, segments: Array<VideoSegment>): Promise<MediaInfoResult> =
+        execute(OperationType.SPLITVIDEO, video) { job ->
+            require(segments.isNotEmpty()) { "At least one segment is required." }
+            val file = job.resolve(video)
+            val info = detectVideoInfo(file.path)
+            segments.forEach { validateSegment(it, info.durationMs) }
+            val outputs = segments.map { segment ->
+                job.output("mp4").also { transform(listOf(clipped(file, segment)), it, includeAudio = info.audioTracks > 0) }.path
+            }
+            makeResult(true, OperationType.SPLITVIDEO, MediaType.VIDEO, video, segments = outputs.toTypedArray())
+        }
+
+    override fun trimVideo(video: String, segment: VideoSegment): Promise<MediaInfoResult> =
+        execute(OperationType.TRIMVIDEO, video) { job ->
+            val file = job.resolve(video)
+            val info = detectVideoInfo(file.path)
+            validateSegment(segment, info.durationMs)
+            val output = job.output("mp4")
+            transform(listOf(clipped(file, segment)), output, includeAudio = info.audioTracks > 0)
+            outputResult(OperationType.TRIMVIDEO, video, output)
+        }
+
+    private fun validateSegment(segment: VideoSegment, durationMs: Double) {
+        require(segment.startMs.isFinite() && segment.endMs.isFinite() && segment.startMs >= 0 && segment.endMs > segment.startMs && segment.endMs <= durationMs) {
+            "Segments must satisfy 0 <= startMs < endMs <= video duration."
+        }
+    }
+
+    private fun clipped(file: File, segment: VideoSegment): EditedMediaItem = EditedMediaItem.Builder(
+        MediaItem.Builder().setUri(Uri.fromFile(file)).setClippingConfiguration(
+            MediaItem.ClippingConfiguration.Builder().setStartPositionUs((segment.startMs * 1000).toLong())
+                .setEndPositionUs((segment.endMs * 1000).toLong()).build()
+        ).build()
+    ).build()
+
+    override fun removeAudio(video: String): Promise<MediaInfoResult> =
+        execute(OperationType.REMOVEAUDIO, video) { job ->
+            val file = job.resolve(video)
+            detectVideoInfo(file.path)
+            val output = job.output("mp4")
+            transform(listOf(EditedMediaItem.Builder(MediaItem.fromUri(Uri.fromFile(file))).setRemoveAudio(true).build()), output)
+            outputResult(OperationType.REMOVEAUDIO, video, output)
+        }
+
+    override fun extractThumbnail(video: String, options: ThumbnailOptions?): Promise<MediaInfoResult> =
+        execute(OperationType.EXTRACTTHUMBNAIL, video, MediaType.IMAGE) { job ->
+            val timeMs = options?.timeMs ?: 0.0
+            val edge = options?.maxLongEdge ?: 1280.0
+            val quality = options?.quality ?: 0.9
+            require(timeMs.isFinite() && timeMs >= 0) { "timeMs must be finite and nonnegative." }
+            require(edge.isFinite() && edge >= 1 && edge <= 8192) { "maxLongEdge must be in [1, 8192]." }
+            require(quality.isFinite() && quality in 0.0..1.0) { "quality must be in [0, 1]." }
+            val file = job.resolve(video)
+            val info = detectVideoInfo(file.path)
+            require(timeMs < info.durationMs) { "timeMs must be less than the video duration." }
+            val (width, height) = computeScaledDimensions(info.displayWidth, info.displayHeight, edge.toInt())
+            val retriever = MediaMetadataRetriever()
+            var bitmap: Bitmap? = null
+            try {
+                retriever.setDataSource(file.path)
+                bitmap = if (android.os.Build.VERSION.SDK_INT >= 27) {
+                    retriever.getScaledFrameAtTime((timeMs * 1000).toLong(), MediaMetadataRetriever.OPTION_CLOSEST, width, height)
+                } else retriever.getFrameAtTime((timeMs * 1000).toLong(), MediaMetadataRetriever.OPTION_CLOSEST)
+                val frame = bitmap ?: throw IOException("Cannot decode the requested frame.")
+                val scaled = if (frame.width > width || frame.height > height) Bitmap.createScaledBitmap(frame, width, height, true) else frame
+                try {
+                    val output = job.output("jpg")
+                    output.outputStream().use { check(scaled.compress(Bitmap.CompressFormat.JPEG, (quality * 100).roundToInt(), it)) { "Cannot encode thumbnail." } }
+                    outputResult(OperationType.EXTRACTTHUMBNAIL, video, output)
+                } finally { if (scaled !== frame) scaled.recycle() }
+            } finally {
+                bitmap?.recycle()
+                retriever.release()
+            }
+        }
+
+    override fun deleteGeneratedFile(uri: String): Promise<Boolean> = Promise.async(ioScope) {
+        workMutex.withLock { MediaJob.deleteOutput(applicationContext, uri) }
+    }
+
+    override fun watermarkVideo(video: String, watermark: String, options: WatermarkOptions?): Promise<MediaInfoResult> =
+        execute(OperationType.WATERMARKVIDEO, video) { job ->
+            require(watermark.isNotBlank() && watermark.length <= 4096) { "Watermark must contain 1 to 4096 characters." }
+            val input = job.resolve(video)
+            val info = detectVideoInfo(input.path)
+            val fontSize = options?.fontSize ?: minOf(info.displayWidth, info.displayHeight) * 0.05
+            val margin = options?.margin ?: minOf(info.displayWidth, info.displayHeight) * 0.025
+            val opacity = options?.opacity ?: 1.0
+            require(fontSize.isFinite() && fontSize >= 1 && fontSize <= 512) { "fontSize must be in [1, 512]." }
+            require(margin.isFinite() && margin >= 0 && margin * 2 < minOf(info.displayWidth, info.displayHeight)) { "margin leaves no room for the watermark." }
+            require(opacity.isFinite() && opacity in 0.0..1.0) { "opacity must be in [0, 1]." }
+            val color = parseColor(options?.color ?: "#FFFFFFFF")
+            val bitmap = textBitmap(watermark, fontSize.toFloat(), color, info.displayWidth - 2 * margin.toInt(), info.displayHeight - 2 * margin.toInt())
+            try {
+                val position = options?.position ?: WatermarkPosition.BOTTOM_RIGHT
+                val x = when (position) {
+                    WatermarkPosition.TOP_LEFT, WatermarkPosition.BOTTOM_LEFT -> margin
+                    WatermarkPosition.TOP_RIGHT, WatermarkPosition.BOTTOM_RIGHT -> info.displayWidth - margin - bitmap.width
+                    WatermarkPosition.CENTER -> (info.displayWidth - bitmap.width) / 2.0
+                }
+                val y = when (position) {
+                    WatermarkPosition.TOP_LEFT, WatermarkPosition.TOP_RIGHT -> margin
+                    WatermarkPosition.BOTTOM_LEFT, WatermarkPosition.BOTTOM_RIGHT -> info.displayHeight - margin - bitmap.height
+                    WatermarkPosition.CENTER -> (info.displayHeight - bitmap.height) / 2.0
+                }
+                val settings = StaticOverlaySettings.Builder().setAlphaScale(opacity.toFloat())
+                    .setOverlayFrameAnchor(-1f, 1f)
+                    .setBackgroundFrameAnchor((2 * x / info.displayWidth - 1).toFloat(), (1 - 2 * y / info.displayHeight).toFloat()).build()
+                val overlay = BitmapOverlay.createStaticBitmapOverlay(bitmap, settings)
+                val effects = Effects(emptyList(), listOf(OverlayEffect(listOf<TextureOverlay>(overlay))))
+                val item = EditedMediaItem.Builder(MediaItem.fromUri(Uri.fromFile(input))).setEffects(effects).build()
+                val output = job.output("mp4")
+                transform(listOf(item), output, includeAudio = info.audioTracks > 0)
+                outputResult(OperationType.WATERMARKVIDEO, video, output)
+            } finally { bitmap.recycle() }
+        }
+
+    private fun parseColor(value: String): Int {
+        require(value.matches(Regex("#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?"))) { "color must be #RRGGBB or #RRGGBBAA." }
+        val rgba = value.drop(1).toLong(16)
+        return if (value.length == 7) (0xFF000000L or rgba).toInt() else ((rgba ushr 8) or ((rgba and 255) shl 24)).toInt()
+    }
+
+    private fun textBitmap(text: String, fontSize: Float, color: Int, width: Int, height: Int): Bitmap {
+        val paint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply { this.color = color; textSize = fontSize; typeface = android.graphics.Typeface.DEFAULT_BOLD }
+        var layout: StaticLayout
+        do {
+            layout = StaticLayout.Builder.obtain(text, 0, text.length, paint, width.coerceAtLeast(1))
+                .setAlignment(Layout.Alignment.ALIGN_NORMAL).setIncludePad(true).build()
+            if (layout.height <= height || paint.textSize <= 1f) break
+            paint.textSize = (paint.textSize * 0.85f).coerceAtLeast(1f)
+        } while (true)
+        require(layout.height <= height) { "Watermark cannot fit inside the video." }
+        val bitmap = Bitmap.createBitmap((0 until layout.lineCount).maxOf { layout.getLineWidth(it) }.toInt().coerceIn(1, width), layout.height.coerceAtLeast(1), Bitmap.Config.ARGB_8888)
+        layout.draw(Canvas(bitmap))
+        return bitmap
+    }
+
+    /** Media3 owns codec backpressure, frame transforms, timestamps, audio and muxing. */
+    private suspend fun transform(items: List<EditedMediaItem>, output: File, videoKbps: Int? = null, audioKbps: Int? = null, includeAudio: Boolean = false, preserveMetadata: Boolean = false) {
+        withTimeout(30 * 60 * 1000L) {
+            withContext(Dispatchers.Main.immediate) {
+                var activeTransformer: Transformer? = null
+                try {
+                suspendCancellableCoroutine<Unit> { continuation ->
+                    val factory = DefaultEncoderFactory.Builder(applicationContext).setEnableFallback(true)
+                    if (videoKbps != null) factory.setRequestedVideoEncoderSettings(VideoEncoderSettings.Builder().setBitrate(videoKbps * 1000).build())
+                    if (audioKbps != null) factory.setRequestedAudioEncoderSettings(AudioEncoderSettings.Builder().setBitrate(audioKbps * 1000).build())
+                    val transformer = Transformer.Builder(applicationContext).setLooper(Looper.getMainLooper())
+                        .setVideoMimeType(MimeTypes.VIDEO_H264).setAudioMimeType(MimeTypes.AUDIO_AAC)
+                        .setEncoderFactory(factory.build())
+                        .setMuxerFactory(MetadataMuxerFactory(preserveMetadata))
+                        .setAssetLoaderFactory(DefaultAssetLoaderFactory(applicationContext,
+                            DataSourceBitmapLoader.Builder(applicationContext).setExecutorService(bitmapExecutor)
+                                .setMaximumOutputDimension(1920).build()))
+                        .addListener(object : Transformer.Listener {
+                            override fun onCompleted(composition: Composition, exportResult: ExportResult) {
+                                if (continuation.isActive) continuation.resume(Unit)
+                            }
+                            override fun onError(composition: Composition, exportResult: ExportResult, exportException: ExportException) {
+                                if (continuation.isActive) continuation.resumeWithException(exportException)
+                            }
+                        }).build()
+                    activeTransformer = transformer
+                    try {
+                        val sequence = if (includeAudio) EditedMediaItemSequence.withAudioAndVideoFrom(items)
+                        else EditedMediaItemSequence.withVideoFrom(items)
+                        val composition = Composition.Builder(sequence)
+                            .setHdrMode(Composition.HDR_MODE_TONE_MAP_HDR_TO_SDR_USING_OPEN_GL).build()
+                        transformer.start(composition, output.path)
+                    } catch (error: Exception) {
+                        transformer.cancel()
+                        if (continuation.isActive) continuation.resumeWithException(error)
+                    }
+                }
+                } finally {
+                    // Resume/cancellation returns to the application looper before recycling overlays or deleting files.
+                    activeTransformer?.cancel()
+                }
+            }
+        }
+        check(output.isFile && output.length() > 0) { "Export produced no media." }
+    }
+
+    companion object {
+        private val ioScope = CoroutineScope(Dispatchers.IO)
+        // Serial across HybridObject instances: device hardware encoders are scarce.
+        private val workMutex = Mutex()
+        private val bitmapExecutor = MoreExecutors.listeningDecorator(Executors.newSingleThreadExecutor { task ->
+            Thread(task, "NitroMediaKit.bitmap").apply { isDaemon = true }
+        })
+    }
 
     private fun buildMediaInfo(
         durationMs: Double? = null,
@@ -114,1543 +436,624 @@ class NitroMediaKit : HybridNitroMediaKitSpec() {
         )
     }
 
-    private fun getLocalFilePath(pathOrUrl: String): String {
-        return try {
-            if (isRemoteUrl(pathOrUrl)) downloadFile(pathOrUrl) else pathOrUrl
-        } catch (e: Exception) {
-            throw IOException("Failed to fetch input media: $pathOrUrl", e)
-        }
-    }
+    private class ValidationException(message: String) : IllegalArgumentException(message)
 
-    private class MonotonicPts {
-        private var last = -1L
-        fun nextFrom(candidateUs: Long): Long {
-            // Ensure strictly increasing by at least 1us
-            val safe = if (candidateUs <= last) last + 1 else candidateUs
-            last = safe
-            return safe
-        }
-        fun reset() { last = -1L }
-    }
+    private class UnsupportedMediaException(message: String) : IllegalArgumentException(message)
 
-    private class MuxerTrackState {
-        var started = false
-        var trackIndex = -1
-        var firstPtsUs = -1L
-        val mono = MonotonicPts()
-    }
-
-    private data class SegmentRangeUs(
-        val startUs: Long,
-        val endUs: Long
+    private data class DetectedImageInfo(
+        val width: Int,
+        val height: Int,
+        val displayWidth: Int,
+        val displayHeight: Int,
+        val rotationDegrees: Int,
+        val hasAlpha: Boolean,
+        val sizeBytes: Long,
+        val extension: String?
     )
 
-    private data class SegmentTrackInfo(
-        val sourceTrackIndex: Int,
-        val outputTrackIndex: Int,
-        val isVideo: Boolean
+    private data class DetectedVideoInfo(
+        val width: Int,
+        val height: Int,
+        val displayWidth: Int,
+        val displayHeight: Int,
+        val rotationDegrees: Int,
+        val durationMs: Double,
+        val fps: Double,
+        val sizeBytes: Long,
+        val audioTracks: Int,
+        val extension: String?
     )
 
-    private fun drainEncoderToMuxer(
-        encoder: MediaCodec,
-        muxer: MediaMuxer,
-        state: MuxerTrackState,
-        bufferInfo: MediaCodec.BufferInfo,
-        timeoutUs: Long,
-        untilEos: Boolean
-    ) {
-        var idleRounds = 0
-        while (true) {
-            val outIndex = encoder.dequeueOutputBuffer(bufferInfo, timeoutUs)
+    private data class ResolvedCompressOptions(
+        val preset: CompressionPreset,
+        val preserveMetadata: Boolean,
+        val image: CompressImageOptions?,
+        val video: CompressVideoOptions?
+    )
 
-            when (outIndex) {
-                MediaCodec.INFO_TRY_AGAIN_LATER -> {
-                    if (!untilEos) return
-                    // During EOS drain, don't bail instantly — give encoder time to flush.
-                    idleRounds++
-                    if (idleRounds >= 50) return
-                }
+    private data class ImageCompressionPlan(
+        val format: CompressImageFormat,
+        val quality: Double?,
+        val maxLongEdge: Int
+    )
 
-                MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> {
-                    if (!state.started) {
-                        state.trackIndex = muxer.addTrack(encoder.outputFormat)
-                        muxer.start()
-                        state.started = true
-                    }
-                }
+    private data class VideoCompressionPlan(
+        val maxLongEdge: Int,
+        val maxFps: Int,
+        val videoBitrateKbps: Int,
+        val audioBitrateKbps: Int,
+        val keepAudio: Boolean
+    )
 
-                else -> if (outIndex >= 0) {
-                    idleRounds = 0
-                    val encodedData = encoder.getOutputBuffer(outIndex)
-
-                    if (encodedData != null) {
-                        val isCodecConfig = (bufferInfo.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG) != 0
-                        val hasData = bufferInfo.size > 0
-
-                        if (!isCodecConfig && hasData && state.started) {
-                            encodedData.position(bufferInfo.offset)
-                            encodedData.limit(bufferInfo.offset + bufferInfo.size)
-
-                            if (state.firstPtsUs < 0) state.firstPtsUs = bufferInfo.presentationTimeUs
-                            val normPts = maxOf(0L, bufferInfo.presentationTimeUs - state.firstPtsUs)
-                            val safePts = state.mono.nextFrom(normPts)
-
-                            val writeInfo = MediaCodec.BufferInfo().apply {
-                                set(bufferInfo.offset, bufferInfo.size, safePts, bufferInfo.flags)
-                            }
-                            muxer.writeSampleData(state.trackIndex, encodedData, writeInfo)
-                        }
-                    }
-
-                    encoder.releaseOutputBuffer(outIndex, false)
-
-                    val eos = (bufferInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0
-                    if (eos) return
-                }
-            }
-        }
+    private fun warning(code: String, message: String): MediaInfoWarning {
+        return MediaInfoWarning(code = code, message = message)
     }
 
-    private class PtsTracker {
-        var prev = -1L
-        var last = -1L
-        fun record(pts: Long) { prev = last; last = pts }
-        fun estimatedLastSampleDuration() = if (prev >= 0) last - prev else 0L
+    private fun resolveCompressOptions(options: CompressMediaOptions?): ResolvedCompressOptions {
+        return ResolvedCompressOptions(
+            preset = options?.preset ?: CompressionPreset.AUTO,
+            preserveMetadata = options?.preserveMetadata ?: false,
+            image = options?.image,
+            video = options?.video
+        )
     }
 
-    // Helper method to check if a string is a remote URL
-    private fun isRemoteUrl(path: String): Boolean {
-        return path.startsWith("http://") || path.startsWith("https://")
-    }
-
-    override fun getMediaInfo(inputUri: String): Promise<MediaInfoResult> {
-        return Promise.async {
-            var extractor: MediaExtractor? = null
-            var retriever: MediaMetadataRetriever? = null
-            var typeGuess = MediaType.VIDEO
-            try {
-                val localPath = getLocalFilePath(inputUri)
-                val file = File(localPath)
-                val sizeBytes = if (file.exists()) file.length().toDouble() else null
-                val extension = file.extension.lowercase().ifEmpty { null }
-
-                val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-                BitmapFactory.decodeFile(localPath, options)
-                if (options.outWidth > 0 && options.outHeight > 0) {
-                    typeGuess = MediaType.IMAGE
-                    val media = buildMediaInfo(
-                        width = options.outWidth.toDouble(),
-                        height = options.outHeight.toDouble(),
-                        format = extension,
-                        sizeBytes = sizeBytes,
-                        audioTracks = 0.0,
-                        videoTracks = 0.0
-                    )
-                    return@async makeResult(
-                        ok = true,
-                        operation = OperationType.GETMEDIAINFO,
-                        type = MediaType.IMAGE,
-                        inputUri = inputUri,
-                        media = media
-                    )
-                }
-
-                retriever = MediaMetadataRetriever().apply { setDataSource(localPath) }
-                val durationMs = retriever?.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toDoubleOrNull()
-                var width = retriever?.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toDoubleOrNull()
-                var height = retriever?.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toDoubleOrNull()
-                val captureFps = retriever?.extractMetadata(MediaMetadataRetriever.METADATA_KEY_CAPTURE_FRAMERATE)?.toDoubleOrNull()
-
-                extractor = MediaExtractor().apply { setDataSource(localPath) }
-                var videoTracks = 0
-                var audioTracks = 0
-                var fps: Double? = captureFps
-                for (i in 0 until extractor!!.trackCount) {
-                    val format = extractor!!.getTrackFormat(i)
-                    val mime = format.getString(MediaFormat.KEY_MIME) ?: ""
-                    if (mime.startsWith("video/")) {
-                        videoTracks++
-                        if (width == null && format.containsKey(MediaFormat.KEY_WIDTH)) {
-                            width = format.getInteger(MediaFormat.KEY_WIDTH).toDouble()
-                        }
-                        if (height == null && format.containsKey(MediaFormat.KEY_HEIGHT)) {
-                            height = format.getInteger(MediaFormat.KEY_HEIGHT).toDouble()
-                        }
-                        if (fps == null && format.containsKey(MediaFormat.KEY_FRAME_RATE)) {
-                            fps = format.getInteger(MediaFormat.KEY_FRAME_RATE).toDouble()
-                        }
-                    } else if (mime.startsWith("audio/")) {
-                        audioTracks++
-                    }
-                }
-                if (videoTracks > 0 && fps == null) {
-                    fps = 30.0
-                }
-
-                val media = buildMediaInfo(
-                    durationMs = durationMs,
-                    width = width,
-                    height = height,
-                    fps = fps,
-                    format = extension,
-                    sizeBytes = sizeBytes,
-                    audioTracks = audioTracks.toDouble(),
-                    videoTracks = videoTracks.toDouble()
-                )
-
-                makeResult(
-                    ok = true,
-                    operation = OperationType.GETMEDIAINFO,
-                    type = MediaType.VIDEO,
-                    inputUri = inputUri,
-                    media = media
-                )
-            } catch (e: Exception) {
-                makeErrorResult(
-                    operation = OperationType.GETMEDIAINFO,
-                    type = typeGuess,
-                    inputUri = inputUri,
-                    error = e
-                )
-            } finally {
-                runCatching { extractor?.release() }
-                runCatching { retriever?.release() }
-            }
-        }
-    }
-
-    override fun convertImageToVideo(image: String, duration: Double): Promise<MediaInfoResult> {
-        return Promise.async {
-            var result: MediaInfoResult
-            var encoder: MediaCodec? = null
-            var muxer: MediaMuxer? = null
-            var eglHelper: EglHelper? = null
-
-            val bufferInfo = MediaCodec.BufferInfo()
-            val muxState = MuxerTrackState()
-
-            try {
-                val localImagePath = getLocalFilePath(image)
-                val bitmap = BitmapFactory.decodeFile(localImagePath)
-                    ?: throw IOException("Cannot decode image at path: $localImagePath")
-
-                val codecInfo = selectCodec(MediaFormat.MIMETYPE_VIDEO_AVC)
-                    ?: throw IllegalStateException("No suitable codec found")
-                val capabilities = codecInfo.getCapabilitiesForType(MediaFormat.MIMETYPE_VIDEO_AVC)
-                val adjustedBitmap = adjustBitmapToSupportedSize(bitmap, capabilities.videoCapabilities)
-
-                val width = adjustedBitmap.width
-                val height = adjustedBitmap.height
-                val frameRate = 30
-                val bitRate = 2_000_000
-
-                val mediaFormat = MediaFormat.createVideoFormat(MediaFormat.MIMETYPE_VIDEO_AVC, width, height).apply {
-                    setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface)
-                    setInteger(MediaFormat.KEY_BIT_RATE, bitRate)
-                    setInteger(MediaFormat.KEY_FRAME_RATE, frameRate)
-                    setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1)
-                }
-
-                encoder = MediaCodec.createByCodecName(codecInfo.name).apply {
-                    configure(mediaFormat, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
-                }
-
-                val inputSurface = encoder!!.createInputSurface()
-                encoder!!.start()
-
-                eglHelper = EglHelper().apply {
-                    createEglContext(inputSurface, width, height)
-                    loadStaticBitmapTexture(adjustedBitmap)
-                }
-
-                val videoFile = File(
-                    applicationContext.getExternalFilesDir(Environment.DIRECTORY_MOVIES),
-                    "video_${System.currentTimeMillis()}.mp4"
-                )
-                muxer = MediaMuxer(videoFile.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
-
-                val totalFrames = maxOf(2, kotlin.math.round(duration * frameRate).toInt())
-                val ptsMono = MonotonicPts()
-
-                for (frameIndex in 0 until totalFrames) {
-                    val ptsUs = ptsMono.nextFrom((frameIndex * 1_000_000L) / frameRate)
-
-                    eglHelper!!.drawStaticFrame()
-                    eglHelper!!.setPresentationTime(ptsUs * 1000L)
-                    eglHelper!!.swapBuffers()
-
-                    // drain what’s available (non-blocking)
-                    drainEncoderToMuxer(
-                        encoder = encoder!!,
-                        muxer = muxer!!,
-                        state = muxState,
-                        bufferInfo = bufferInfo,
-                        timeoutUs = 0L,
-                        untilEos = false
-                    )
-                }
-
-                encoder!!.signalEndOfInputStream()
-
-                // IMPORTANT: fully drain until EOS
-                drainEncoderToMuxer(
-                    encoder = encoder!!,
-                    muxer = muxer!!,
-                    state = muxState,
-                    bufferInfo = bufferInfo,
-                    timeoutUs = 10_000L,
-                    untilEos = true
-                )
-
-                val outputPath = videoFile.absolutePath
-                val media = buildMediaInfo(
-                    durationMs = duration * 1000.0,
-                    width = width.toDouble(),
-                    height = height.toDouble(),
-                    fps = frameRate.toDouble(),
-                    format = "mp4",
-                    sizeBytes = File(outputPath).length().toDouble(),
-                    audioTracks = 0.0,
-                    videoTracks = 1.0
-                )
-                result = makeResult(
-                    ok = true,
-                    operation = OperationType.CONVERTIMAGETOVIDEO,
-                    type = MediaType.VIDEO,
-                    inputUri = image,
-                    outputUri = outputPath,
-                    media = media
-                )
-            } catch (e: Exception) {
-                result = makeErrorResult(
-                    operation = OperationType.CONVERTIMAGETOVIDEO,
-                    type = MediaType.VIDEO,
-                    inputUri = image,
-                    error = e
-                )
-            } finally {
-                eglHelper?.release()
-                runCatching { encoder?.stop() }
-                runCatching { encoder?.release() }
-                if (muxState.started) runCatching { muxer?.stop() }
-                runCatching { muxer?.release() }
-            }
-            result
-        }
-    }
-
-    override fun mergeVideos(videos: Array<String>): Promise<MediaInfoResult> {
-        return Promise.async {
-            var result: MediaInfoResult
-            var muxer: MediaMuxer? = null
-            var isMuxerStarted = false
-            var outputVideoTrackIndex = -1
-            var outputAudioTrackIndex = -1
-            val tempFiles = mutableListOf<String>()
-            var timelineUs = 0L
-
-            try {
-                // Step 1: Analyze all videos
-                val counts = mutableMapOf<String, Int>()
-                val sigToProps = mutableMapOf<String, VideoProperties>()
-
-                for (video in videos) {
-                    val local = getLocalFilePath(video)
-                    val sig = videoSignature(local)
-                    counts[sig] = (counts[sig] ?: 0) + 1
-                    sigToProps[sig] = getVideoProperties(local) // still used for width/height/fps target
-                }
-                val targetSig = counts.maxByOrNull { it.value }?.key
-                    ?: throw IllegalArgumentException("No videos to merge")
-
-                val targetProps = sigToProps[targetSig]!!
-                // Step 2: Prepare videos (re-encode non-matching ones)
-                val videosToMerge = mutableListOf<String>()
-                for (video in videos) {
-                    val local = getLocalFilePath(video)
-                    val sig = videoSignature(local)
-
-                    if (sig == targetSig) {
-                        videosToMerge.add(local)
-                    } else {
-                        val reencodedPath = reencodeVideo(local, targetProps.width, targetProps.height, targetProps.frameRate)
-                        videosToMerge.add(reencodedPath)
-                        tempFiles.add(reencodedPath)
-                    }
-                }
-                // Step 3: Output file + muxer
-                val videoFile = File(
-                    applicationContext.getExternalFilesDir(Environment.DIRECTORY_MOVIES),
-                    "merged_${System.currentTimeMillis()}.mp4"
-                )
-
-                muxer = MediaMuxer(videoFile.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
-                val outMuxer = muxer!!
-
-                // Step 4: Track formats from first video
-                val firstExtractor = MediaExtractor()
-                var videoFormat: MediaFormat? = null
-                var audioFormat: MediaFormat? = null
-                try {
-                    firstExtractor.setDataSource(videosToMerge[0])
-                    for (i in 0 until firstExtractor.trackCount) {
-                        val format = firstExtractor.getTrackFormat(i)
-                        val mime = format.getString(MediaFormat.KEY_MIME) ?: ""
-                        if (mime.startsWith("video/") && videoFormat == null) videoFormat = format
-                        else if (mime.startsWith("audio/") && audioFormat == null) audioFormat = format
-                    }
-                } finally {
-                    firstExtractor.release()
-                }
-
-                // ✅ ADD TRACKS + START MUXER (this was missing)
-                if (videoFormat != null) outputVideoTrackIndex = outMuxer.addTrack(videoFormat!!)
-                if (audioFormat != null) outputAudioTrackIndex = outMuxer.addTrack(audioFormat!!)
-
-                if (outputVideoTrackIndex == -1 && outputAudioTrackIndex == -1) {
-                    throw IllegalArgumentException("No audio/video tracks found in first input")
-                }
-
-                outMuxer.start()
-                isMuxerStarted = true
-
-                // Step 5: Copy samples (separate extractors inside copyTrack)
-                val vMono = MonotonicPts()
-                val aMono = MonotonicPts()
-                for (videoPath in videosToMerge) {
-                    val vDur = if (outputVideoTrackIndex != -1) {
-                        copyTrack(
-                            srcPath = videoPath,
-                            mimePrefix = "video/",
-                            muxer = outMuxer,
-                            outTrackIndex = outputVideoTrackIndex,
-                            ptsOffsetUs = timelineUs,
-                            mono = vMono
-                        )
-                    } else 0L
-
-                    val aDur = if (outputAudioTrackIndex != -1) {
-                        copyTrack(
-                            srcPath = videoPath,
-                            mimePrefix = "audio/",
-                            muxer = outMuxer,
-                            outTrackIndex = outputAudioTrackIndex,
-                            ptsOffsetUs = timelineUs,
-                            mono = aMono
-                        )
-                    } else 0L
-
-                    timelineUs += maxOf(vDur, aDur)
-                }
-                val outputPath = videoFile.absolutePath
-                val media = buildMediaInfo(
-                    durationMs = if (timelineUs > 0) timelineUs / 1000.0 else null,
-                    width = targetProps.width.toDouble(),
-                    height = targetProps.height.toDouble(),
-                    fps = targetProps.frameRate.toDouble(),
-                    format = "mp4",
-                    sizeBytes = File(outputPath).length().toDouble(),
-                    audioTracks = if (outputAudioTrackIndex != -1) 1.0 else 0.0,
-                    videoTracks = if (outputVideoTrackIndex != -1) 1.0 else 0.0
-                )
-                result = makeResult(
-                    ok = true,
-                    operation = OperationType.MERGEVIDEOS,
-                    type = MediaType.VIDEO,
-                    outputUri = outputPath,
-                    media = media
-                )
-            } catch (e: Exception) {
-                Log.e("MediaKit", "Merge failed", e)
-                result = makeErrorResult(
-                    operation = OperationType.MERGEVIDEOS,
-                    type = MediaType.VIDEO,
-                    error = e
-                )
-            } finally {
-                try {
-                    if (isMuxerStarted) muxer?.stop()
-                } catch (_: Throwable) {}
-                try {
-                    muxer?.release()
-                } catch (_: Throwable) {}
-
-                for (tempFile in tempFiles) runCatching { File(tempFile).delete() }
-            }
-            result
-        }
-    }
-
-    override fun splitVideo(video: String, segments: Array<VideoSegment>): Promise<MediaInfoResult> {
-        return Promise.async {
-            var extractor: MediaExtractor? = null
-            var retriever: MediaMetadataRetriever? = null
-            try {
-                if (segments.isEmpty()) {
-                    throw IllegalArgumentException("`segments` must contain at least one range.")
-                }
-
-                val localVideoPath = getLocalFilePath(video)
-                retriever = MediaMetadataRetriever().apply { setDataSource(localVideoPath) }
-                val durationMs = retriever!!
-                    .extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
-                    ?.toDoubleOrNull()
-                    ?: throw IllegalArgumentException("Unable to read video duration for split operation.")
-                val durationUs = (durationMs * 1000.0).toLong()
-                if (durationUs <= 0L) {
-                    throw IllegalArgumentException("Input video has invalid duration.")
-                }
-
-                var width = retriever!!
-                    .extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)
-                    ?.toDoubleOrNull()
-                var height = retriever!!
-                    .extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)
-                    ?.toDoubleOrNull()
-                val captureFps = retriever!!
-                    .extractMetadata(MediaMetadataRetriever.METADATA_KEY_CAPTURE_FRAMERATE)
-                    ?.toDoubleOrNull()
-
-                extractor = MediaExtractor().apply { setDataSource(localVideoPath) }
-
-                var videoTracks = 0
-                var audioTracks = 0
-                var fps: Double? = captureFps
-                for (i in 0 until extractor!!.trackCount) {
-                    val format = extractor!!.getTrackFormat(i)
-                    val mime = format.getString(MediaFormat.KEY_MIME) ?: ""
-                    if (mime.startsWith("video/")) {
-                        videoTracks++
-                        if (width == null && format.containsKey(MediaFormat.KEY_WIDTH)) {
-                            width = format.getInteger(MediaFormat.KEY_WIDTH).toDouble()
-                        }
-                        if (height == null && format.containsKey(MediaFormat.KEY_HEIGHT)) {
-                            height = format.getInteger(MediaFormat.KEY_HEIGHT).toDouble()
-                        }
-                        if (fps == null && format.containsKey(MediaFormat.KEY_FRAME_RATE)) {
-                            fps = format.getInteger(MediaFormat.KEY_FRAME_RATE).toDouble()
-                        }
-                    } else if (mime.startsWith("audio/")) {
-                        audioTracks++
-                    }
-                }
-                if (videoTracks == 0) {
-                    throw IllegalArgumentException("No video track found in $localVideoPath")
-                }
-                if (fps == null) {
-                    fps = 30.0
-                }
-
-                val normalizedSegments = segments.mapIndexed { index, segment ->
-                    normalizeSplitSegmentRange(
-                        segment = segment,
-                        index = index,
-                        totalDurationUs = durationUs
-                    )
-                }
-                val outputSegments = normalizedSegments.mapIndexed { index, range ->
-                    splitSingleSegment(
-                        inputPath = localVideoPath,
-                        segment = range,
-                        segmentIndex = index
-                    )
-                }.toTypedArray()
-
-                val file = File(localVideoPath)
-                val extension = file.extension.lowercase().ifEmpty { null }
-                val sizeBytes = if (file.exists()) file.length().toDouble() else null
-                val media = buildMediaInfo(
-                    durationMs = durationMs,
-                    width = width,
-                    height = height,
-                    fps = fps,
-                    format = extension,
-                    sizeBytes = sizeBytes,
-                    audioTracks = audioTracks.toDouble(),
-                    videoTracks = videoTracks.toDouble()
-                )
-
-                makeResult(
-                    ok = true,
-                    operation = OperationType.SPLITVIDEO,
-                    type = MediaType.VIDEO,
-                    inputUri = video,
-                    segments = outputSegments,
-                    media = media
-                )
-            } catch (e: Exception) {
-                makeErrorResult(
-                    operation = OperationType.SPLITVIDEO,
-                    type = MediaType.VIDEO,
-                    inputUri = video,
-                    error = e
-                )
-            } finally {
-                runCatching { extractor?.release() }
-                runCatching { retriever?.release() }
-            }
-        }
-    }
-
-    override fun watermarkVideo(video: String, watermark: String, position: String): Promise<MediaInfoResult> {
-        return Promise.async {
-            var result: MediaInfoResult
-            var extractor: MediaExtractor? = null
-            var decoder: MediaCodec? = null
-            var encoder: MediaCodec? = null
-            var muxer: MediaMuxer? = null
-            var eglHelper: EglHelper? = null
-
-            var muxerStarted = false
-            var outVideoTrackIndex = -1
-            var outAudioTrackIndex = -1
-
-            try {
-                val localVideoPath = getLocalFilePath(video)
-
-                extractor = MediaExtractor().apply { setDataSource(localVideoPath) }
-
-                // ---- Find tracks (video + audio format for passthrough) ----
-                var videoTrackIndex = -1
-                var audioFormat: MediaFormat? = null
-
-                for (i in 0 until extractor!!.trackCount) {
-                    val format = extractor!!.getTrackFormat(i)
-                    val mime = format.getString(MediaFormat.KEY_MIME) ?: ""
-                    if (mime.startsWith("video/") && videoTrackIndex == -1) videoTrackIndex = i
-                    if (mime.startsWith("audio/") && audioFormat == null) audioFormat = format
-                }
-
-                if (videoTrackIndex == -1) {
-                    throw IllegalArgumentException("No video track found in $localVideoPath")
-                }
-
-                extractor!!.selectTrack(videoTrackIndex)
-                extractor!!.seekTo(0, MediaExtractor.SEEK_TO_CLOSEST_SYNC)
-
-                val inputFormat = extractor!!.getTrackFormat(videoTrackIndex)
-                val width = inputFormat.getIntegerOrDefault(MediaFormat.KEY_WIDTH, "KEY_WIDTH")
-                val height = inputFormat.getIntegerOrDefault(MediaFormat.KEY_HEIGHT, "KEY_HEIGHT")
-                val inputMime = inputFormat.getString(MediaFormat.KEY_MIME) ?: throw IllegalArgumentException("Missing MIME")
-
-                val frameRate = if (inputFormat.containsKey(MediaFormat.KEY_FRAME_RATE)) {
-                    inputFormat.getInteger(MediaFormat.KEY_FRAME_RATE).coerceIn(1, 120)
-                } else 30
-                val durationUs = if (inputFormat.containsKey(MediaFormat.KEY_DURATION)) {
-                    inputFormat.getLong(MediaFormat.KEY_DURATION)
-                } else null
-
-                // ---- Encoder ----
-                val outputFormat = MediaFormat.createVideoFormat(MediaFormat.MIMETYPE_VIDEO_AVC, width, height).apply {
-                    setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface)
-                    setInteger(MediaFormat.KEY_BIT_RATE, 2_000_000)
-                    setInteger(MediaFormat.KEY_FRAME_RATE, frameRate)
-                    setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1)
-                }
-
-                encoder = MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_VIDEO_AVC).apply {
-                    configure(outputFormat, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
-                }
-                val inputSurface = encoder!!.createInputSurface()
-                encoder!!.start()
-
-                // ---- EGL ----
-                eglHelper = EglHelper().apply {
-                    createEglContext(inputSurface, width, height)
-                }
-
-                // ---- Decoder (to EGL surface) ----
-                val decoderSurface = eglHelper!!.getVideoSurface()
-                decoder = MediaCodec.createDecoderByType(inputMime).apply {
-                    configure(inputFormat, decoderSurface, null, 0)
-                    start()
-                }
-
-                // ---- Muxer ----
-                val outputFile = File(
-                    applicationContext.getExternalFilesDir(Environment.DIRECTORY_MOVIES),
-                    "watermarked_video_${System.currentTimeMillis()}.mp4"
-                )
-                muxer = MediaMuxer(outputFile.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
-
-                // Add audio track BEFORE muxer.start() (video track added later on format change)
-                outAudioTrackIndex = if (audioFormat != null) muxer!!.addTrack(audioFormat!!) else -1
-
-                // ---- Watermark overlay ----
-                val watermarkBitmap = eglHelper!!.createTextBitmap(watermark, 64f, Color.WHITE)
-                eglHelper!!.setOverlayBitmap(watermarkBitmap)
-                val (posX, posY) = calculateWatermarkPosition(position, watermarkBitmap, width, height)
-
-                // ---- Timing (normalize to 0 + monotonic) ----
-                val decInfo = MediaCodec.BufferInfo()
-                val encInfo = MediaCodec.BufferInfo()
-
-                var sawDecoderEOS = false
-                var signaledEncoderEOS = false
-                var sawEncoderEOS = false
-
-                var firstVideoPtsUs = -1L
-                val renderPtsMono = MonotonicPts()
-
-                var firstEncPtsUs = -1L
-                val writePtsMono = MonotonicPts()
-
-                val timeoutUs = 10_000L
-                var eosDrainIdleRounds = 0
-
-                while (!sawEncoderEOS) {
-                    // ---- Feed decoder input ----
-                    if (!sawDecoderEOS) {
-                        val inIndex = decoder!!.dequeueInputBuffer(timeoutUs)
-                        if (inIndex >= 0) {
-                            val inBuf = decoder!!.getInputBuffer(inIndex)!!
-                            val size = extractor!!.readSampleData(inBuf, 0)
-
-                            if (size < 0) {
-                                decoder!!.queueInputBuffer(
-                                    inIndex, 0, 0, 0L,
-                                    MediaCodec.BUFFER_FLAG_END_OF_STREAM
-                                )
-                                sawDecoderEOS = true
-                            } else {
-                                val ptsUs = extractor!!.sampleTime
-                                decoder!!.queueInputBuffer(inIndex, 0, size, ptsUs, 0)
-                                extractor!!.advance()
-                            }
-                        }
-                    }
-
-                    // ---- Drain decoder output -> render -> encoder surface ----
-                    var decoderOut = true
-                    while (decoderOut) {
-                        val outIndex = decoder!!.dequeueOutputBuffer(decInfo, timeoutUs)
-                        when (outIndex) {
-                            MediaCodec.INFO_TRY_AGAIN_LATER -> decoderOut = false
-                            MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> Unit
-                            else -> if (outIndex >= 0) {
-                                val doRender = shouldRenderDecodedToSurface(decInfo)
-                                decoder!!.releaseOutputBuffer(outIndex, doRender)
-
-                                if (doRender) {
-                                    if (firstVideoPtsUs < 0) firstVideoPtsUs = decInfo.presentationTimeUs
-                                    val normPtsUs = maxOf(0L, decInfo.presentationTimeUs - firstVideoPtsUs)
-                                    val safePtsUs = renderPtsMono.nextFrom(normPtsUs)
-
-                                    eglHelper!!.drawFrameWithOverlay(posX, posY, videoWidth = width, videoHeight = height)
-                                    eglHelper!!.setPresentationTime(safePtsUs * 1000L)
-                                    eglHelper!!.swapBuffers()
-                                }
-
-                                val eos = (decInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0
-                                if (eos && !signaledEncoderEOS) {
-                                    encoder!!.signalEndOfInputStream()
-                                    signaledEncoderEOS = true
-                                    decoderOut = false
-                                }
-                            }
-                        }
-                    }
-
-                    // ---- Drain encoder output -> muxer ----
-                    var encoderOut = true
-                    while (encoderOut) {
-                        val outIndex = encoder!!.dequeueOutputBuffer(encInfo, timeoutUs)
-                        when (outIndex) {
-                            MediaCodec.INFO_TRY_AGAIN_LATER -> {
-                                if (signaledEncoderEOS) {
-                                    eosDrainIdleRounds++
-                                    if (eosDrainIdleRounds >= 50) encoderOut = false
-                                } else {
-                                    encoderOut = false
-                                }
-                            }
-
-                            MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> {
-                                if (muxerStarted) throw RuntimeException("Encoder format changed twice")
-                                outVideoTrackIndex = muxer!!.addTrack(encoder!!.outputFormat)
-                                muxer!!.start()
-                                muxerStarted = true
-                            }
-
-                            else -> if (outIndex >= 0) {
-                                eosDrainIdleRounds = 0
-
-                                val encodedData = encoder!!.getOutputBuffer(outIndex)
-                                    ?: throw RuntimeException("Encoder output buffer $outIndex was null")
-
-                                val isCodecConfig = (encInfo.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG) != 0
-                                val isEos = (encInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0
-
-                                if (isCodecConfig) {
-                                    encoder!!.releaseOutputBuffer(outIndex, false)
-                                    continue
-                                }
-
-                                if (muxerStarted && encInfo.size > 0) {
-                                    encodedData.position(encInfo.offset)
-                                    encodedData.limit(encInfo.offset + encInfo.size)
-
-                                    if (firstEncPtsUs < 0) firstEncPtsUs = encInfo.presentationTimeUs
-                                    val normPtsUs = maxOf(0L, encInfo.presentationTimeUs - firstEncPtsUs)
-                                    val safePtsUs = writePtsMono.nextFrom(normPtsUs)
-
-                                    val writeInfo = MediaCodec.BufferInfo().apply {
-                                        set(encInfo.offset, encInfo.size, safePtsUs, encInfo.flags)
-                                    }
-
-                                    muxer!!.writeSampleData(outVideoTrackIndex, encodedData, writeInfo)
-                                }
-
-                                encoder!!.releaseOutputBuffer(outIndex, false)
-
-                                if (isEos) {
-                                    sawEncoderEOS = true
-                                    encoderOut = false
-                                }
-                            }
-                        }
-                    }
-                }
-
-                // ---- Copy audio (passthrough) ----
-                if (muxerStarted && outAudioTrackIndex != -1) {
-                    copyTrack(
-                        srcPath = localVideoPath,
-                        mimePrefix = "audio/",
-                        muxer = muxer!!,
-                        outTrackIndex = outAudioTrackIndex,
-                        ptsOffsetUs = 0L,
-                        mono = MonotonicPts()
-                    )
-                }
-
-                val outputPath = outputFile.absolutePath
-                val media = buildMediaInfo(
-                    durationMs = durationUs?.let { it / 1000.0 },
-                    width = width.toDouble(),
-                    height = height.toDouble(),
-                    fps = frameRate.toDouble(),
-                    format = "mp4",
-                    sizeBytes = File(outputPath).length().toDouble(),
-                    audioTracks = if (audioFormat != null) 1.0 else 0.0,
-                    videoTracks = 1.0
-                )
-                result = makeResult(
-                    ok = true,
-                    operation = OperationType.WATERMARKVIDEO,
-                    type = MediaType.VIDEO,
-                    inputUri = video,
-                    outputUri = outputPath,
-                    media = media
-                )
-            } catch (e: Exception) {
-                result = makeErrorResult(
-                    operation = OperationType.WATERMARKVIDEO,
-                    type = MediaType.VIDEO,
-                    inputUri = video,
-                    error = e
-                )
-            } finally {
-                runCatching { extractor?.release() }
-                runCatching { decoder?.stop(); decoder?.release() }
-                runCatching { encoder?.stop(); encoder?.release() }
-                if (muxerStarted) runCatching { muxer?.stop() }
-                runCatching { muxer?.release() }
-                runCatching { eglHelper?.release() }
-            }
-            result
-        }
-    }
-
-    private fun normalizeSplitSegmentRange(
-        segment: VideoSegment,
-        index: Int,
-        totalDurationUs: Long
-    ): SegmentRangeUs {
-        if (!segment.startMs.isFinite() || !segment.endMs.isFinite()) {
-            throw IllegalArgumentException(
-                "Segment at index $index must use finite startMs/endMs values."
-            )
+    private fun detectImageInfo(localPath: String): DetectedImageInfo? {
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeFile(localPath, bounds)
+        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) {
+            return null
         }
 
-        val startUs = (segment.startMs * 1000.0).toLong().coerceIn(0L, totalDurationUs)
-        val endUs = (segment.endMs * 1000.0).toLong().coerceIn(0L, totalDurationUs)
-        if (endUs <= startUs) {
-            throw IllegalArgumentException(
-                "Segment at index $index must satisfy endMs > startMs within video duration."
-            )
-        }
+        val file = File(localPath)
+        val rotationDegrees = readImageRotationDegrees(localPath)
+        val isRotated = rotationDegrees == 90 || rotationDegrees == 270
+        val displayWidth = if (isRotated) bounds.outHeight else bounds.outWidth
+        val displayHeight = if (isRotated) bounds.outWidth else bounds.outHeight
+        val hasAlpha = detectImageAlpha(localPath)
 
-        return SegmentRangeUs(startUs = startUs, endUs = endUs)
+        return DetectedImageInfo(
+            width = bounds.outWidth,
+            height = bounds.outHeight,
+            displayWidth = displayWidth,
+            displayHeight = displayHeight,
+            rotationDegrees = rotationDegrees,
+            hasAlpha = hasAlpha,
+            sizeBytes = if (file.exists()) file.length() else 0L,
+            extension = bounds.outMimeType?.let { MimeTypeMap.getSingleton().getExtensionFromMimeType(it) }
+                ?: file.extension.lowercase().takeIf { it.isNotEmpty() && it != "bin" }
+        )
     }
 
-    private fun splitSingleSegment(
-        inputPath: String,
-        segment: SegmentRangeUs,
-        segmentIndex: Int
-    ): String {
-        var formatExtractor: MediaExtractor? = null
-        var muxer: MediaMuxer? = null
-        var muxerStarted = false
-        var outputFile: File? = null
-        var completed = false
-
+    private fun detectVideoInfo(localPath: String): DetectedVideoInfo {
+        var extractor: MediaExtractor? = null
+        var retriever: MediaMetadataRetriever? = null
         try {
-            formatExtractor = MediaExtractor().apply { setDataSource(inputPath) }
+            val file = File(localPath)
+            val extension = file.extension.lowercase().ifEmpty { null }
+            val sizeBytes = if (file.exists()) file.length() else 0L
 
-            val outputDir =
-                applicationContext.getExternalFilesDir(Environment.DIRECTORY_MOVIES)
-                    ?: applicationContext.filesDir
-            outputFile = File(
-                outputDir,
-                "split_${System.currentTimeMillis()}_${segmentIndex}.mp4"
-            )
+            retriever = MediaMetadataRetriever().apply { setDataSource(localPath) }
+            val durationMs =
+                retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toDoubleOrNull()
+                    ?: throw UnsupportedMediaException("Unable to read video duration.")
+            val rotationDegrees =
+                retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)?.toIntOrNull()
+                    ?: 0
 
-            muxer = MediaMuxer(
-                outputFile.absolutePath,
-                MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4
-            )
+            var width =
+                retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toIntOrNull()
+            var height =
+                retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toIntOrNull()
+            var fps =
+                retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_CAPTURE_FRAMERATE)?.toDoubleOrNull()
 
-            val trackInfos = mutableListOf<SegmentTrackInfo>()
+            extractor = MediaExtractor().apply { setDataSource(localPath) }
+            var audioTracks = 0
             var hasVideoTrack = false
-
-            for (trackIndex in 0 until formatExtractor.trackCount) {
-                val format = formatExtractor.getTrackFormat(trackIndex)
-                val mime = format.getString(MediaFormat.KEY_MIME) ?: continue
-                if (!mime.startsWith("video/") && !mime.startsWith("audio/")) continue
-
-                val outputTrackIndex = muxer.addTrack(format)
-                val isVideo = mime.startsWith("video/")
-                if (isVideo) hasVideoTrack = true
-                trackInfos.add(
-                    SegmentTrackInfo(
-                        sourceTrackIndex = trackIndex,
-                        outputTrackIndex = outputTrackIndex,
-                        isVideo = isVideo
-                    )
-                )
+            for (i in 0 until extractor.trackCount) {
+                val format = extractor.getTrackFormat(i)
+                val mime = format.getString(MediaFormat.KEY_MIME) ?: ""
+                if (mime.startsWith("video/")) {
+                    hasVideoTrack = true
+                    if (width == null && format.containsKey(MediaFormat.KEY_WIDTH)) {
+                        width = format.getInteger(MediaFormat.KEY_WIDTH)
+                    }
+                    if (height == null && format.containsKey(MediaFormat.KEY_HEIGHT)) {
+                        height = format.getInteger(MediaFormat.KEY_HEIGHT)
+                    }
+                    if (fps == null && format.containsKey(MediaFormat.KEY_FRAME_RATE)) {
+                        fps = runCatching { format.getInteger(MediaFormat.KEY_FRAME_RATE).toDouble() }
+                            .getOrElse { runCatching { format.getFloat(MediaFormat.KEY_FRAME_RATE).toDouble() }.getOrNull() }
+                    }
+                } else if (mime.startsWith("audio/")) {
+                    audioTracks++
+                }
             }
 
             if (!hasVideoTrack) {
-                throw IllegalArgumentException("No video track found in $inputPath")
-            }
-            if (trackInfos.isEmpty()) {
-                throw IllegalArgumentException("No audio/video tracks available for split operation.")
+                throw UnsupportedMediaException("No video track found in input.")
             }
 
-            muxer.start()
-            muxerStarted = true
+            require(durationMs.isFinite() && durationMs > 0) { "Invalid video duration." }
+            val safeWidth = (width ?: 0).coerceAtLeast(1)
+            val safeHeight = (height ?: 0).coerceAtLeast(1)
+            val safeFps = (fps ?: 30.0).takeIf { it.isFinite() && it > 0 } ?: 30.0
+            val normalizedRotation = normalizeRotationDegrees(rotationDegrees)
+            val isRotated = normalizedRotation == 90 || normalizedRotation == 270
+            val displayWidth = if (isRotated) safeHeight else safeWidth
+            val displayHeight = if (isRotated) safeWidth else safeHeight
 
-            var totalSamplesWritten = 0
-            for (trackInfo in trackInfos) {
-                totalSamplesWritten += copySplitTrackSamples(
-                    inputPath = inputPath,
-                    trackInfo = trackInfo,
-                    muxer = muxer,
-                    segment = segment
-                )
-            }
-
-            if (totalSamplesWritten == 0) {
-                throw IllegalArgumentException(
-                    "Segment at index $segmentIndex produced no samples. " +
-                        "Try ranges that align with keyframes."
-                )
-            }
-
-            completed = true
-            return outputFile.absolutePath
-        } finally {
-            runCatching { formatExtractor?.release() }
-            if (muxerStarted) {
-                runCatching { muxer?.stop() }
-            }
-            runCatching { muxer?.release() }
-            if (!completed) {
-                runCatching { outputFile?.delete() }
-            }
-        }
-    }
-
-    private fun copySplitTrackSamples(
-        inputPath: String,
-        trackInfo: SegmentTrackInfo,
-        muxer: MediaMuxer,
-        segment: SegmentRangeUs
-    ): Int {
-        val primarySeekMode = if (trackInfo.isVideo) {
-            // Keep requested segment duration by starting from the previous keyframe and
-            // keeping a tiny preroll inside the output timeline.
-            MediaExtractor.SEEK_TO_PREVIOUS_SYNC
-        } else {
-            MediaExtractor.SEEK_TO_CLOSEST_SYNC
-        }
-        val includePrerollSamples = trackInfo.isVideo
-        val primaryCount = copySplitTrackSamplesAttempt(
-            inputPath = inputPath,
-            trackInfo = trackInfo,
-            muxer = muxer,
-            segment = segment,
-            seekMode = primarySeekMode,
-            includeSamplesBeforeSegmentStart = includePrerollSamples
-        )
-        if (primaryCount > 0 || !trackInfo.isVideo) {
-            return primaryCount
-        }
-
-        // Rare fallback for malformed tracks where previous-sync seek yields no samples.
-        return copySplitTrackSamplesAttempt(
-            inputPath = inputPath,
-            trackInfo = trackInfo,
-            muxer = muxer,
-            segment = segment,
-            seekMode = MediaExtractor.SEEK_TO_NEXT_SYNC,
-            includeSamplesBeforeSegmentStart = false
-        )
-    }
-
-    private fun copySplitTrackSamplesAttempt(
-        inputPath: String,
-        trackInfo: SegmentTrackInfo,
-        muxer: MediaMuxer,
-        segment: SegmentRangeUs,
-        seekMode: Int,
-        includeSamplesBeforeSegmentStart: Boolean
-    ): Int {
-        val extractor = MediaExtractor()
-        try {
-            extractor.setDataSource(inputPath)
-            extractor.selectTrack(trackInfo.sourceTrackIndex)
-            // For zero-start segments, keep the extractor at file start to avoid skipping
-            // the initial GOP when NEXT/PREV seek semantics vary across devices.
-            if (segment.startUs > 0L) {
-                extractor.seekTo(segment.startUs, seekMode)
-            }
-
-            val trackFormat = extractor.getTrackFormat(trackInfo.sourceTrackIndex)
-            val bufferCapacity = if (trackFormat.containsKey(MediaFormat.KEY_MAX_INPUT_SIZE)) {
-                maxOf(trackFormat.getInteger(MediaFormat.KEY_MAX_INPUT_SIZE), 1 * 1024 * 1024)
-            } else {
-                1 * 1024 * 1024
-            }
-
-            val buffer = ByteBuffer.allocateDirect(bufferCapacity)
-            val bufferInfo = MediaCodec.BufferInfo()
-            val monoPts = MonotonicPts()
-            val requestedDurationUs = segment.endUs - segment.startUs
-            var sourcePtsBaseUs = segment.startUs
-            var sourceWindowEndUs = segment.endUs
-            var sourceWindowInitialized = false
-
-            var samplesWritten = 0
-            while (true) {
-                val sampleTimeUs = extractor.sampleTime
-                if (sampleTimeUs < 0L) break
-
-                if (!includeSamplesBeforeSegmentStart && sampleTimeUs < segment.startUs) {
-                    if (!extractor.advance()) break
-                    continue
-                }
-
-                if (!sourceWindowInitialized) {
-                    // Some files start their first readable sample after 0 due edit lists /
-                    // container offsets. Anchor the output timeline to the first kept sample
-                    // so the exported clip still matches the requested duration.
-                    sourcePtsBaseUs = maxOf(segment.startUs, sampleTimeUs)
-                    val maxEndUs = Long.MAX_VALUE - requestedDurationUs
-                    sourceWindowEndUs = if (sourcePtsBaseUs > maxEndUs) {
-                        Long.MAX_VALUE
-                    } else {
-                        sourcePtsBaseUs + requestedDurationUs
-                    }
-                    sourceWindowInitialized = true
-                }
-
-                if (sampleTimeUs >= sourceWindowEndUs) break
-
-                val sampleSize = extractor.readSampleData(buffer, 0)
-                if (sampleSize < 0) break
-
-                val normalizedPtsUs = maxOf(0L, sampleTimeUs - sourcePtsBaseUs)
-                val safePtsUs = monoPts.nextFrom(normalizedPtsUs)
-
-                buffer.position(0)
-                buffer.limit(sampleSize)
-                bufferInfo.set(0, sampleSize, safePtsUs, extractor.sampleFlags)
-                muxer.writeSampleData(trackInfo.outputTrackIndex, buffer, bufferInfo)
-                samplesWritten++
-
-                if (!extractor.advance()) break
-            }
-
-            return samplesWritten
-        } finally {
-            extractor.release()
-        }
-    }
-
-
-    private fun reencodeVideo(
-        inputPath: String,
-        targetWidth: Int,
-        targetHeight: Int,
-        targetFrameRate: Float
-    ): String {
-        var videoExtractor: MediaExtractor? = null
-        var decoder: MediaCodec? = null
-        var encoder: MediaCodec? = null
-        var muxer: MediaMuxer? = null
-        var eglHelper: EglHelper? = null
-
-        val bufferInfo = MediaCodec.BufferInfo()
-        val muxState = MuxerTrackState()
-
-        try {
-            videoExtractor = MediaExtractor().apply { setDataSource(inputPath) }
-
-            var videoTrackIndex = -1
-            var audioFormat: MediaFormat? = null
-
-            for (i in 0 until videoExtractor!!.trackCount) {
-                val format = videoExtractor!!.getTrackFormat(i)
-                val mime = format.getString(MediaFormat.KEY_MIME) ?: ""
-                if (mime.startsWith("video/") && videoTrackIndex == -1) videoTrackIndex = i
-                if (mime.startsWith("audio/") && audioFormat == null) audioFormat = format
-            }
-            if (videoTrackIndex == -1) throw IllegalArgumentException("No video track in $inputPath")
-
-            videoExtractor!!.selectTrack(videoTrackIndex)
-            videoExtractor!!.seekTo(0, MediaExtractor.SEEK_TO_CLOSEST_SYNC)
-
-            val inputFormat = videoExtractor!!.getTrackFormat(videoTrackIndex)
-            val inputMime = inputFormat.getString(MediaFormat.KEY_MIME)!!
-
-            val outputFormat = MediaFormat.createVideoFormat(
-                MediaFormat.MIMETYPE_VIDEO_AVC,
-                targetWidth,
-                targetHeight
-            ).apply {
-                setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface)
-                setInteger(MediaFormat.KEY_BIT_RATE, 2_000_000)
-                setInteger(MediaFormat.KEY_FRAME_RATE, targetFrameRate.toInt().coerceAtLeast(1))
-                setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1)
-            }
-
-            encoder = MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_VIDEO_AVC).apply {
-                configure(outputFormat, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
-            }
-            val inputSurface = encoder!!.createInputSurface()
-            encoder!!.start()
-
-            eglHelper = EglHelper().apply {
-                createEglContext(inputSurface, targetWidth, targetHeight)
-            }
-            val decoderSurface = eglHelper!!.getVideoSurface()
-
-            decoder = MediaCodec.createDecoderByType(inputMime).apply {
-                configure(inputFormat, decoderSurface, null, 0)
-                start()
-            }
-
-            val outputFile = File(
-                applicationContext.getExternalFilesDir(Environment.DIRECTORY_MOVIES),
-                "reencoded_${System.currentTimeMillis()}.mp4"
+            return DetectedVideoInfo(
+                width = safeWidth,
+                height = safeHeight,
+                displayWidth = displayWidth,
+                displayHeight = displayHeight,
+                rotationDegrees = normalizedRotation,
+                durationMs = durationMs,
+                fps = safeFps,
+                sizeBytes = sizeBytes,
+                audioTracks = audioTracks,
+                extension = extension
             )
-            muxer = MediaMuxer(outputFile.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
+        } finally {
+            runCatching { extractor?.release() }
+            runCatching { retriever?.release() }
+        }
+    }
 
-            // Add audio track BEFORE muxer.start() (muxer starts later on encoder format change)
-            val outAudioTrackIndex = if (audioFormat != null) muxer!!.addTrack(audioFormat!!) else -1
+    private fun compressImage(
+        inputUri: String,
+        localPath: String,
+        imageInfo: DetectedImageInfo,
+        options: ResolvedCompressOptions,
+        job: MediaJob
+    ): MediaInfoResult {
+        val warnings = mutableListOf<MediaInfoWarning>()
+        val plan = resolveImageCompressionPlan(imageInfo, options)
+        val imageOptions = options.image
 
-            val timeoutUs = 10_000L
-            var sawDecoderEOS = false
-            var signaledEncoderEOS = false
+        if (plan.format == CompressImageFormat.PNG && imageOptions?.quality != null) {
+            warnings += warning(
+                code = "IMAGE_QUALITY_IGNORED",
+                message = "`image.quality` is ignored for PNG output."
+            )
+        }
+        if (imageInfo.sizeBytes in 1..(400 * 1024L) &&
+            plan.maxLongEdge >= maxOf(imageInfo.displayWidth, imageInfo.displayHeight)
+        ) {
+            warnings += warning(
+                code = "ALREADY_SMALL",
+                message = "Input image is already small; compression savings may be limited."
+            )
+        }
 
-            var firstDecoderPtsUs = -1L
-            val ptsMono = MonotonicPts()
+        val decodeSampleSize = calculateInSampleSize(
+            width = imageInfo.width,
+            height = imageInfo.height,
+            targetLongEdge = plan.maxLongEdge
+        )
+        val decodedBitmap = BitmapFactory.decodeFile(
+            localPath,
+            BitmapFactory.Options().apply {
+                inSampleSize = decodeSampleSize
+                inPreferredConfig = Bitmap.Config.ARGB_8888
+            }
+        ) ?: throw UnsupportedMediaException("Unable to decode image input.")
 
-            while (true) {
-                // ---- Feed decoder input ----
-                if (!sawDecoderEOS) {
-                    val inIndex = decoder!!.dequeueInputBuffer(timeoutUs)
-                    if (inIndex >= 0) {
-                        val inBuf = decoder!!.getInputBuffer(inIndex)!!
-                        val size = videoExtractor!!.readSampleData(inBuf, 0)
-                        if (size < 0) {
-                            decoder!!.queueInputBuffer(
-                                inIndex, 0, 0, 0L,
-                                MediaCodec.BUFFER_FLAG_END_OF_STREAM
+        var orientedBitmap: Bitmap? = null
+        var resizedBitmap: Bitmap? = null
+        try {
+            orientedBitmap = applyExifOrientation(
+                bitmap = decodedBitmap,
+                orientation = readImageExifOrientation(localPath)
+            )
+
+            val (targetWidth, targetHeight) = computeScaledDimensions(
+                width = orientedBitmap.width,
+                height = orientedBitmap.height,
+                maxLongEdge = plan.maxLongEdge
+            )
+
+            resizedBitmap = if (
+                orientedBitmap.width == targetWidth &&
+                orientedBitmap.height == targetHeight
+            ) {
+                orientedBitmap
+            } else {
+                Bitmap.createScaledBitmap(orientedBitmap, targetWidth, targetHeight, true)
+            }
+
+            val outputExt = if (plan.format == CompressImageFormat.PNG) "png" else "jpg"
+            val outputFile = job.output(outputExt)
+
+            val encoded = FileOutputStream(outputFile).use { output ->
+                when (plan.format) {
+                    CompressImageFormat.PNG -> resizedBitmap.compress(
+                        Bitmap.CompressFormat.PNG,
+                        100,
+                        output
+                    )
+
+                    else -> {
+                        val qualityInt = ((plan.quality ?: 0.8) * 100.0).roundToInt().coerceIn(0, 100)
+                        resizedBitmap.compress(Bitmap.CompressFormat.JPEG, qualityInt, output)
+                    }
+                }
+            }
+
+            if (!encoded) {
+                throw IOException("Failed to encode compressed image.")
+            }
+
+            if (options.preserveMetadata) {
+                if (plan.format == CompressImageFormat.PNG) {
+                    warnings += warning(
+                        code = "METADATA_PRESERVE_PARTIAL",
+                        message = "PNG metadata passthrough is not supported on Android; output keeps visual orientation only."
+                    )
+                } else {
+                    runCatching { copyExifMetadata(sourcePath = localPath, targetPath = outputFile.absolutePath) }
+                        .onFailure {
+                            warnings += warning(
+                                code = "METADATA_PRESERVE_FAILED",
+                                message = "Unable to preserve EXIF metadata: ${it.message ?: "unknown error"}"
                             )
-                            sawDecoderEOS = true
-                        } else {
-                            val pts = videoExtractor!!.sampleTime
-                            decoder!!.queueInputBuffer(inIndex, 0, size, pts, 0)
-                            videoExtractor!!.advance()
                         }
-                    }
                 }
-
-                // ---- Drain decoder output -> render -> encoder surface ----
-                var decoderOut = true
-                while (decoderOut) {
-                    val outIndex = decoder!!.dequeueOutputBuffer(bufferInfo, timeoutUs)
-                    when (outIndex) {
-                        MediaCodec.INFO_TRY_AGAIN_LATER -> decoderOut = false
-                        MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> Unit
-                        else -> if (outIndex >= 0) {
-                            val doRender = shouldRenderDecodedToSurface(bufferInfo)
-                            decoder!!.releaseOutputBuffer(outIndex, doRender)
-
-                            if (doRender) {
-                                if (firstDecoderPtsUs < 0) firstDecoderPtsUs = bufferInfo.presentationTimeUs
-                                val normPtsUs = maxOf(0L, bufferInfo.presentationTimeUs - firstDecoderPtsUs)
-                                val safePtsUs = ptsMono.nextFrom(normPtsUs)
-
-                                // ✅ NO OVERLAY HERE
-                                eglHelper!!.drawVideoFrame()
-                                eglHelper!!.setPresentationTime(safePtsUs * 1000L)
-                                eglHelper!!.swapBuffers()
-                            }
-
-                            val eos = (bufferInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0
-                            if (eos && !signaledEncoderEOS) {
-                                encoder!!.signalEndOfInputStream()
-                                signaledEncoderEOS = true
-                                decoderOut = false
-                            }
-                        }
-                    }
-                }
-
-                // ---- Drain encoder output (non-blocking) ----
-                drainEncoderToMuxer(
-                    encoder = encoder!!,
-                    muxer = muxer!!,
-                    state = muxState,
-                    bufferInfo = bufferInfo,
-                    timeoutUs = 0L,
-                    untilEos = false
-                )
-
-                // Once we signaled EOS to encoder, we can break and do a full EOS drain
-                if (signaledEncoderEOS) break
             }
 
-            // ---- Final: drain encoder until EOS ----
-            drainEncoderToMuxer(
-                encoder = encoder!!,
-                muxer = muxer!!,
-                state = muxState,
-                bufferInfo = bufferInfo,
-                timeoutUs = timeoutUs,
-                untilEos = true
+            val outputSizeBytes = if (outputFile.exists()) outputFile.length().toDouble() else null
+            val sourceSizeBytes = imageInfo.sizeBytes.toDouble()
+            if (sourceSizeBytes > 0.0 && outputSizeBytes != null && outputSizeBytes >= sourceSizeBytes * 0.95) {
+                warnings += warning(
+                    code = "LIMITED_SAVINGS",
+                    message = "Compressed output is close to source size."
+                )
+            }
+
+            val media = buildMediaInfo(
+                width = targetWidth.toDouble(),
+                height = targetHeight.toDouble(),
+                format = outputExt,
+                sizeBytes = outputSizeBytes,
+                audioTracks = 0.0,
+                videoTracks = 0.0
             )
 
-            // ---- Copy audio after muxer has started ----
-            if (muxState.started && outAudioTrackIndex != -1) {
-                copyTrack(
-                    srcPath = inputPath,
-                    mimePrefix = "audio/",
-                    muxer = muxer!!,
-                    outTrackIndex = outAudioTrackIndex,
-                    ptsOffsetUs = 0L,
-                    mono = MonotonicPts()
-                )
-            }
-
-            return outputFile.absolutePath
+            return makeResult(
+                ok = true,
+                operation = OperationType.COMPRESSMEDIA,
+                type = MediaType.IMAGE,
+                inputUri = inputUri,
+                outputUri = outputFile.absolutePath,
+                media = media,
+                warnings = warnings.takeIf { it.isNotEmpty() }?.toTypedArray()
+            )
         } finally {
-            runCatching { videoExtractor?.release() }
-            runCatching { decoder?.stop(); decoder?.release() }
-            runCatching { encoder?.stop(); encoder?.release() }
-            if (muxState.started) runCatching { muxer?.stop() }
-            runCatching { muxer?.release() }
-            runCatching { eglHelper?.release() }
-        }
-    }
-    // Extensions to handle missing keys in MediaFormat
-    private fun MediaFormat.getIntegerOrDefault(key: String, keyName: String, defaultValue: Int = 0): Int {
-        return if (containsKey(key)) {
-            getInteger(key)
-        } else {
-            Log.w("HybridMediaKit", "$keyName is missing; defaulting to $defaultValue")
-            defaultValue
+            if (resizedBitmap != null && resizedBitmap !== orientedBitmap) {
+                resizedBitmap.recycle()
+            }
+            if (orientedBitmap != null && orientedBitmap !== decodedBitmap) {
+                orientedBitmap.recycle()
+            }
+            decodedBitmap.recycle()
         }
     }
 
-    private fun csdHash(format: MediaFormat, key: String): Pair<Int, Int> {
-        if (!format.containsKey(key)) return 0 to 0
-        val bb = format.getByteBuffer(key) ?: return 0 to 0
-        val dup = bb.duplicate()
-        dup.clear()
-        val bytes = ByteArray(dup.remaining())
-        dup.get(bytes)
-        return bytes.contentHashCode() to bytes.size
-    }
-
-    private fun videoSignature(path: String): String {
-        val ex = MediaExtractor()
-        try {
-            ex.setDataSource(path)
-            for (i in 0 until ex.trackCount) {
-                val f = ex.getTrackFormat(i)
-                val mime = f.getString(MediaFormat.KEY_MIME) ?: ""
-                if (!mime.startsWith("video/")) continue
-
-                val w = f.getInteger(MediaFormat.KEY_WIDTH)
-                val h = f.getInteger(MediaFormat.KEY_HEIGHT)
-                val fps = if (f.containsKey(MediaFormat.KEY_FRAME_RATE)) f.getInteger(MediaFormat.KEY_FRAME_RATE) else 30
-                val (h0, s0) = csdHash(f, "csd-0")
-                val (h1, s1) = csdHash(f, "csd-1")
-
-                val prof = if (f.containsKey(MediaFormat.KEY_PROFILE)) f.getInteger(MediaFormat.KEY_PROFILE) else -1
-                val lvl  = if (f.containsKey(MediaFormat.KEY_LEVEL)) f.getInteger(MediaFormat.KEY_LEVEL) else -1
-
-                return "$mime|${w}x$h@$fps|csd0=$h0:$s0|csd1=$h1:$s1|p=$prof|l=$lvl"
+    private fun resolveImageCompressionPlan(
+        info: DetectedImageInfo,
+        options: ResolvedCompressOptions
+    ): ImageCompressionPlan {
+        val imageOptions = options.image
+        val sourceLongEdge = maxOf(info.displayWidth, info.displayHeight)
+        val sizeBytes = info.sizeBytes
+        val presetLongEdge = when (options.preset) {
+            CompressionPreset.AUTO -> when {
+                sizeBytes <= 1_500_000L -> minOf(sourceLongEdge, 4096)
+                sizeBytes <= 5_000_000L -> minOf(sourceLongEdge, 2048)
+                else -> minOf(sourceLongEdge, 1600)
             }
-            throw IllegalArgumentException("No video track found in $path")
-        } finally {
-            ex.release()
-        }
-    }
 
-    private fun MediaFormat.getLongOrDefault(key: String, keyName: String, defaultValue: Long = 0L): Long {
-        return if (containsKey(key)) {
-            getLong(key)
-        } else {
-            Log.w("HybridMediaKit", "$keyName is missing; defaulting to $defaultValue")
-            defaultValue
-        }
-    }
-
-    private fun shouldRenderDecodedToSurface(info: MediaCodec.BufferInfo): Boolean {
-        // Only safe "no-frame" case we skip: the empty EOS buffer.
-        val eos = (info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0
-        if (eos && info.size == 0) return false
-        // Some codecs can also emit codec-config buffers; never render those.
-        if ((info.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG) != 0) return false
-        return true
-    }
-
-    private fun getVideoProperties(videoPath: String): VideoProperties {
-        val extractor = MediaExtractor()
-        try {
-            extractor.setDataSource(videoPath)
-            for (i in 0 until extractor.trackCount) {
-                val format = extractor.getTrackFormat(i)
-                val mime = format.getString(MediaFormat.KEY_MIME)
-                if (mime?.startsWith("video/") == true) {
-                    val width = format.getInteger(MediaFormat.KEY_WIDTH)
-                    val height = format.getInteger(MediaFormat.KEY_HEIGHT)
-                    // Frame rate might not always be present; default to 30 if absent
-                    val frameRate = if (format.containsKey(MediaFormat.KEY_FRAME_RATE)) {
-                        format.getInteger(MediaFormat.KEY_FRAME_RATE).toFloat()
-                    } else {
-                        30f
-                    }
-                    return VideoProperties(width, height, frameRate)
-                }
-            }
-            throw IllegalArgumentException("No video track found in $videoPath")
-        } finally {
-            extractor.release()
-        }
-    }
-
-    data class VideoProperties(val width: Int, val height: Int, val frameRate: Float)
-
-    private fun calculateWatermarkPosition(
-        position: String,
-        watermarkBitmap: Bitmap,
-        videoWidth: Int,
-        videoHeight: Int
-    ): Pair<Float, Float> {
-        var posX = 0f   // give them a default so they’re always initialised
-        var posY = 0f
-
-        when (position.lowercase()) {
-            "top-left" -> {
-                posX = 0f
-                posY = (videoHeight - watermarkBitmap.height).toFloat()
-            }
-            "top-right" -> {
-                posX = (videoWidth  - watermarkBitmap.width ).toFloat()
-                posY = (videoHeight - watermarkBitmap.height).toFloat()
-            }
-            "bottom-left" -> {
-                posX = 0f
-                posY = 0f
-            }
-            "bottom-right" -> {
-                posX = (videoWidth  - watermarkBitmap.width ).toFloat()
-                posY = 0f
-            }
-            else -> {
-                // centre by default
-                posX = ((videoWidth  - watermarkBitmap.width )  / 2f)
-                posY = ((videoHeight - watermarkBitmap.height) / 2f)
-            }
+            CompressionPreset.HIGH -> minOf(sourceLongEdge, 2560)
+            CompressionPreset.BALANCED -> minOf(sourceLongEdge, 1920)
+            CompressionPreset.SMALL -> minOf(sourceLongEdge, 1280)
         }
 
-        return Pair(posX, posY)
-    }
-
-    private fun adjustBitmapToSupportedSize(
-        bitmap: Bitmap,
-        videoCapabilities: VideoCapabilities
-    ): Bitmap {
-        val widthAlignment = videoCapabilities.widthAlignment
-        val heightAlignment = videoCapabilities.heightAlignment
-
-        val standardResolutions = listOf(
-            Pair(1920, 1080),
-            Pair(1280, 720),
-            Pair(640, 480)
+        val manualLongEdge = imageOptions?.maxLongEdge?.let { value ->
+            requirePositiveFinite(value, "image.maxLongEdge")
+            require(value <= 8192) { "image.maxLongEdge must not exceed 8192." }
+            value.roundToInt()
+        }
+        val targetLongEdge = minOf(
+            sourceLongEdge,
+            (manualLongEdge ?: presetLongEdge).coerceAtLeast(2)
         )
 
-        val aspectRatio = bitmap.width.toFloat() / bitmap.height
-
-        for ((stdWidth, stdHeight) in standardResolutions) {
-            var width = stdWidth - (stdWidth % widthAlignment)
-            var height = stdHeight - (stdHeight % heightAlignment)
-
-            // Adjust dimensions to maintain aspect ratio
-            if (aspectRatio >= 1) {
-                // Landscape orientation
-                height = (width / aspectRatio).toInt()
-                height -= height % heightAlignment
-            } else {
-                // Portrait orientation
-                width = (height * aspectRatio).toInt()
-                width -= width % widthAlignment
-            }
-
-            // Ensure dimensions are within encoder's supported ranges
-            if (videoCapabilities.isSizeSupported(width, height)) {
-                Log.d("HybridMediaKit", "Using standard resolution: ${width}x${height}")
-                return Bitmap.createScaledBitmap(bitmap, width, height, true)
-            }
+        val explicitFormat = imageOptions?.format ?: CompressImageFormat.AUTO
+        val outputFormat = when (explicitFormat) {
+            CompressImageFormat.AUTO -> if (info.hasAlpha) CompressImageFormat.PNG else CompressImageFormat.JPEG
+            CompressImageFormat.JPEG -> CompressImageFormat.JPEG
+            CompressImageFormat.PNG -> CompressImageFormat.PNG
         }
 
-        throw IllegalArgumentException("No supported standard resolution found")
-    }
-
-
-    private fun selectCodec(mimeType: String): MediaCodecInfo? {
-        val codecList = MediaCodecList(MediaCodecList.ALL_CODECS)
-        val codecInfos = codecList.codecInfos
-        for (info in codecInfos) {
-            if (!info.isEncoder) continue
-            if (info.supportedTypes.contains(mimeType)) {
-                return info
+        val manualQuality = imageOptions?.quality?.also { quality ->
+            requireFinite(quality, "image.quality")
+            if (quality < 0.0 || quality > 1.0) {
+                throw ValidationException("`image.quality` must be between 0 and 1.")
             }
         }
-        return null
+        val megapixels = (info.displayWidth.toDouble() * info.displayHeight.toDouble()) / 1_000_000.0
+        val presetQuality = when (options.preset) {
+            CompressionPreset.AUTO -> when {
+                megapixels <= 2.0 -> 0.86
+                megapixels <= 8.0 -> 0.80
+                else -> 0.74
+            }
+
+            CompressionPreset.HIGH -> 0.9
+            CompressionPreset.BALANCED -> 0.82
+            CompressionPreset.SMALL -> 0.72
+        }
+
+        val outputQuality = if (outputFormat == CompressImageFormat.JPEG) {
+            manualQuality ?: presetQuality
+        } else {
+            null
+        }
+
+        return ImageCompressionPlan(
+            format = outputFormat,
+            quality = outputQuality,
+            maxLongEdge = targetLongEdge
+        )
     }
 
-    private fun copyTrack(
-        srcPath: String,
-        mimePrefix: String,
-        muxer: MediaMuxer,
-        outTrackIndex: Int,
-        ptsOffsetUs: Long,
-        mono: MonotonicPts
-    ): Long {
-        val extractor = MediaExtractor()
-        try {
-            extractor.setDataSource(srcPath)
+    private fun resolveVideoCompressionPlan(
+        info: DetectedVideoInfo,
+        options: ResolvedCompressOptions
+    ): VideoCompressionPlan {
+        val videoOptions = options.video
+        val durationSec = (info.durationMs / 1000.0).coerceAtLeast(0.001)
+        val sourceLongEdge = maxOf(info.displayWidth, info.displayHeight)
+        val sourceFps = if (info.fps.isFinite() && info.fps > 0) info.fps else 30.0
+        val inputBitrateKbps = (info.sizeBytes.toDouble() * 8.0) / durationSec / 1000.0
 
-            var trackIndex = -1
-            var format: MediaFormat? = null
-            for (i in 0 until extractor.trackCount) {
-                val f = extractor.getTrackFormat(i)
-                val m = f.getString(MediaFormat.KEY_MIME) ?: ""
-                if (m.startsWith(mimePrefix)) { trackIndex = i; format = f; break }
+        val presetLongEdge = when (options.preset) {
+            CompressionPreset.AUTO -> when {
+                sourceLongEdge > 1920 -> 1280
+                durationSec > 120.0 -> minOf(sourceLongEdge, 720)
+                durationSec > 30.0 -> minOf(sourceLongEdge, 960)
+                else -> minOf(sourceLongEdge, 1080)
             }
-            if (trackIndex == -1 || format == null) return 0L
 
-            extractor.selectTrack(trackIndex)
+            CompressionPreset.HIGH -> minOf(sourceLongEdge, 1280)
+            CompressionPreset.BALANCED -> minOf(sourceLongEdge, 960)
+            CompressionPreset.SMALL -> minOf(sourceLongEdge, 720)
+        }
 
-            // For VIDEO: make sure we start on a sync sample (prevents black flashes at joins)
-            extractor.seekTo(0, MediaExtractor.SEEK_TO_CLOSEST_SYNC)
-            if (mimePrefix == "video/") {
-                while ((extractor.sampleFlags and MediaExtractor.SAMPLE_FLAG_SYNC) == 0) {
-                    if (!extractor.advance()) return 0L
+        val presetFps = when (options.preset) {
+            CompressionPreset.AUTO -> minOf(sourceFps, 30.0)
+            CompressionPreset.HIGH -> minOf(sourceFps, 30.0)
+            CompressionPreset.BALANCED -> minOf(sourceFps, 30.0)
+            CompressionPreset.SMALL -> minOf(sourceFps, 24.0)
+        }
+
+        val presetVideoBitrate = when (options.preset) {
+            CompressionPreset.AUTO -> {
+                val base = when {
+                    presetLongEdge <= 480 -> 700.0
+                    presetLongEdge <= 720 -> 1200.0
+                    presetLongEdge <= 960 -> 1800.0
+                    else -> 2600.0
                 }
-            }
-
-            val cap = if (format!!.containsKey(MediaFormat.KEY_MAX_INPUT_SIZE))
-                maxOf(format!!.getInteger(MediaFormat.KEY_MAX_INPUT_SIZE), 2 * 1024 * 1024)
-            else
-                4 * 1024 * 1024
-
-            val buffer = java.nio.ByteBuffer.allocateDirect(cap)
-            val info = MediaCodec.BufferInfo()
-
-            var firstPtsUs = -1L
-            val ptsTracker = PtsTracker()
-
-            while (true) {
-                val size = extractor.readSampleData(buffer, 0)
-                if (size < 0) break
-
-                val samplePts = extractor.sampleTime
-                if (firstPtsUs < 0) firstPtsUs = samplePts
-                ptsTracker.record(samplePts)
-
-                info.offset = 0
-                info.size = size
-                info.flags = extractor.sampleFlags
-
-                val cand = (samplePts - firstPtsUs) + ptsOffsetUs
-                info.presentationTimeUs = mono.nextFrom(maxOf(0L, cand))
-
-                buffer.position(0)
-                buffer.limit(size)
-                muxer.writeSampleData(outTrackIndex, buffer, info)
-
-                extractor.advance()
-            }
-
-            if (firstPtsUs < 0) return 0L
-            val durUs = (ptsTracker.last - firstPtsUs) + ptsTracker.estimatedLastSampleDuration()
-            return maxOf(0L, durUs)
-        } finally {
-            extractor.release()
-        }
-    }
-
-    private fun downloadFile(urlString: String): String {
-        val url = URL(urlString)
-
-        val connection = (url.openConnection() as HttpURLConnection).apply {
-            instanceFollowRedirects = true
-            connectTimeout = 15_000
-            readTimeout = 30_000
-            setRequestProperty("User-Agent", "NitroMediaKit/1.0 (Android)")
-        }
-
-        try {
-            connection.connect()
-
-            val code = connection.responseCode
-            if (code !in 200..299) {
-                val err = runCatching { connection.errorStream?.bufferedReader()?.readText() }.getOrNull()
-                throw IOException("Download failed: HTTP $code ${connection.responseMessage}${if (!err.isNullOrBlank()) " - $err" else ""}")
-            }
-
-            // Safer filename
-            val rawName = url.path.substringAfterLast('/').ifBlank { "temp_${System.currentTimeMillis()}" }
-            val file = File(applicationContext.cacheDir, rawName)
-
-            connection.inputStream.use { input ->
-                FileOutputStream(file).use { output ->
-                    input.copyTo(output)
+                val durationMultiplier = when {
+                    durationSec <= 30.0 -> 1.15
+                    durationSec <= 120.0 -> 1.0
+                    else -> 0.82
                 }
+                val target = clampDouble(base * durationMultiplier, 600.0, 3200.0)
+                minOf(target, maxOf(600.0, inputBitrateKbps * 0.85))
             }
 
-            return file.absolutePath
-        } finally {
-            connection.disconnect()
+            CompressionPreset.HIGH -> 2800.0
+            CompressionPreset.BALANCED -> 1800.0
+            CompressionPreset.SMALL -> 1100.0
+        }
+
+        val presetAudioBitrate = when (options.preset) {
+            CompressionPreset.AUTO -> when {
+                durationSec > 300.0 -> 64.0
+                durationSec <= 30.0 -> 128.0
+                else -> 96.0
+            }
+
+            CompressionPreset.HIGH -> 128.0
+            CompressionPreset.BALANCED -> 96.0
+            CompressionPreset.SMALL -> 64.0
+        }
+
+        val overrideLongEdge = videoOptions?.maxLongEdge?.also { requirePositiveFinite(it, "video.maxLongEdge"); require(it <= 8192) { "video.maxLongEdge must not exceed 8192." } }
+        val overrideFps = videoOptions?.maxFps?.also { requirePositiveFinite(it, "video.maxFps") }
+        val overrideVideoBitrate =
+            videoOptions?.videoBitrateKbps?.also { requirePositiveFinite(it, "video.videoBitrateKbps") }
+        val overrideAudioBitrate =
+            videoOptions?.audioBitrateKbps?.also { requirePositiveFinite(it, "video.audioBitrateKbps") }
+
+        return VideoCompressionPlan(
+            maxLongEdge = minOf(
+                sourceLongEdge,
+                (overrideLongEdge?.roundToInt() ?: presetLongEdge).coerceAtLeast(2)
+            ),
+            maxFps = minOf(sourceFps, overrideFps ?: presetFps).roundToInt().coerceIn(1, 120),
+            videoBitrateKbps = (overrideVideoBitrate ?: presetVideoBitrate).roundToInt().coerceIn(300, 12_000),
+            audioBitrateKbps = (overrideAudioBitrate ?: presetAudioBitrate).roundToInt().coerceIn(32, 320),
+            keepAudio = videoOptions?.keepAudio ?: true
+        )
+    }
+
+    private fun calculateInSampleSize(width: Int, height: Int, targetLongEdge: Int): Int {
+        var inSampleSize = 1
+        val sourceLongEdge = maxOf(width, height)
+        if (targetLongEdge <= 0 || sourceLongEdge <= targetLongEdge) {
+            return inSampleSize
+        }
+
+        while ((sourceLongEdge / (inSampleSize * 2)) >= targetLongEdge) {
+            inSampleSize *= 2
+        }
+        return inSampleSize.coerceAtLeast(1)
+    }
+
+    private fun computeScaledDimensions(width: Int, height: Int, maxLongEdge: Int): Pair<Int, Int> {
+        val safeWidth = width.coerceAtLeast(1)
+        val safeHeight = height.coerceAtLeast(1)
+        val sourceLong = maxOf(safeWidth, safeHeight).toDouble()
+        val targetLong = maxLongEdge.coerceAtLeast(2).toDouble()
+        if (sourceLong <= targetLong) {
+            return safeWidth to safeHeight
+        }
+
+        val scale = targetLong / sourceLong
+        val scaledWidth = maxOf(1, (safeWidth * scale).roundToInt())
+        val scaledHeight = maxOf(1, (safeHeight * scale).roundToInt())
+        return scaledWidth to scaledHeight
+    }
+
+    private fun clampDouble(value: Double, min: Double, max: Double): Double {
+        return kotlin.math.max(min, kotlin.math.min(max, value))
+    }
+
+    private fun requireFinite(value: Double, name: String) {
+        if (!value.isFinite()) {
+            throw ValidationException("`$name` must be a finite number.")
         }
     }
-}   
+
+    private fun requirePositiveFinite(value: Double, name: String) {
+        requireFinite(value, name)
+        if (value <= 0.0) {
+            throw ValidationException("`$name` must be greater than 0.")
+        }
+    }
+
+    private fun normalizeRotationDegrees(rotation: Int): Int {
+        val normalized = ((rotation % 360) + 360) % 360
+        return when (normalized) {
+            90, 180, 270 -> normalized
+            else -> 0
+        }
+    }
+
+    private fun readImageExifOrientation(path: String): Int {
+        return runCatching {
+            ExifInterface(path).getAttributeInt(
+                ExifInterface.TAG_ORIENTATION,
+                ExifInterface.ORIENTATION_NORMAL
+            )
+        }.getOrDefault(ExifInterface.ORIENTATION_NORMAL)
+    }
+
+    private fun readImageRotationDegrees(path: String): Int {
+        return when (readImageExifOrientation(path)) {
+            ExifInterface.ORIENTATION_ROTATE_90,
+            ExifInterface.ORIENTATION_TRANSPOSE -> 90
+
+            ExifInterface.ORIENTATION_ROTATE_180,
+            ExifInterface.ORIENTATION_FLIP_VERTICAL -> 180
+
+            ExifInterface.ORIENTATION_ROTATE_270,
+            ExifInterface.ORIENTATION_TRANSVERSE -> 270
+
+            else -> 0
+        }
+    }
+
+    private fun applyExifOrientation(bitmap: Bitmap, orientation: Int): Bitmap {
+        if (orientation == ExifInterface.ORIENTATION_NORMAL || orientation == ExifInterface.ORIENTATION_UNDEFINED) {
+            return bitmap
+        }
+
+        val matrix = Matrix().apply {
+            when (orientation) {
+                ExifInterface.ORIENTATION_FLIP_HORIZONTAL -> preScale(-1f, 1f)
+                ExifInterface.ORIENTATION_ROTATE_180 -> postRotate(180f)
+                ExifInterface.ORIENTATION_FLIP_VERTICAL -> preScale(1f, -1f)
+                ExifInterface.ORIENTATION_TRANSPOSE -> {
+                    preScale(-1f, 1f)
+                    postRotate(270f)
+                }
+
+                ExifInterface.ORIENTATION_ROTATE_90 -> postRotate(90f)
+                ExifInterface.ORIENTATION_TRANSVERSE -> {
+                    preScale(-1f, 1f)
+                    postRotate(90f)
+                }
+
+                ExifInterface.ORIENTATION_ROTATE_270 -> postRotate(270f)
+            }
+        }
+
+        return Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
+    }
+
+    private fun detectImageAlpha(path: String): Boolean {
+        val bitmap = BitmapFactory.decodeFile(
+            path,
+            BitmapFactory.Options().apply {
+                inPreferredConfig = Bitmap.Config.ARGB_8888
+                inSampleSize = 128
+            }
+        ) ?: return false
+        return try {
+            bitmap.hasAlpha()
+        } finally {
+            bitmap.recycle()
+        }
+    }
+
+    private fun copyExifMetadata(sourcePath: String, targetPath: String) {
+        val sourceExif = ExifInterface(sourcePath)
+        val targetExif = ExifInterface(targetPath)
+        val tags = arrayOf(
+            "ApertureValue",
+            "Artist",
+            "DateTime",
+            "DateTimeDigitized",
+            "ExposureBiasValue",
+            "ExposureMode",
+            "ExposureProgram",
+            "ExposureTime",
+            "Flash",
+            "FocalLength",
+            "FNumber",
+            "GPSAltitude",
+            "GPSAltitudeRef",
+            "GPSDateStamp",
+            "GPSLatitude",
+            "GPSLatitudeRef",
+            "GPSLongitude",
+            "GPSLongitudeRef",
+            "GPSProcessingMethod",
+            "GPSTimeStamp",
+            "ISOSpeedRatings",
+            "Make",
+            "Model",
+            "WhiteBalance"
+        )
+        for (tag in tags) {
+            val value = sourceExif.getAttribute(tag)
+            if (!value.isNullOrEmpty()) {
+                targetExif.setAttribute(tag, value)
+            }
+        }
+        // Pixel data is already transformed to upright orientation.
+        targetExif.setAttribute(
+            ExifInterface.TAG_ORIENTATION,
+            ExifInterface.ORIENTATION_NORMAL.toString()
+        )
+        targetExif.saveAttributes()
+    }
+
+
+}

@@ -1,209 +1,188 @@
 # react-native-nitro-media-kit
 
-High-performance image-and-video processing for React Native powered by [Nitro Modules](https://nitro.margelo.com/).
+Native image and video processing for React Native, powered by [Nitro Modules](https://nitro.margelo.com/). Android exports use Media3 Transformer; iOS uses AVFoundation and Core Image. Media stays in native memory and files; JavaScript receives paths and metadata.
 
-## ✨ Features
-
-| Feature                | Android | iOS | Notes                                                                     |
-| ---------------------- | ------- | --- | ------------------------------------------------------------------------- |
-| `getMediaInfo`         | ✔︎      | ✔︎  | Reads basic metadata (duration, dimensions, type).                        |
-| `convertImageToVideo`  | ✔︎      | ✔︎  | Turns any local file or remote URL into an H.264 MP4 (typically ~30 fps). |
-| `mergeVideos`          | ✔︎      | ✔︎  | Concatenates an arbitrary list of MP4s, normalising size/FPS when needed. |
-| `splitVideo`           | ✔︎      | ✔︎  | Cuts one input video into multiple output clips from requested time ranges. |
-| `watermarkVideo`       | ✔︎      | ✔︎  | Places a text watermark in 4 corners or centre – remote URLs supported.   |
-| Hardware-backed codecs | ✔︎      | ✔︎  | Uses MediaCodec / AVFoundation surfaces for efficient rendering.          |
-| Remote-URL fallback    | ✔︎      | ✔︎  | Automatically downloads HTTP/HTTPS sources to a temp cache.               |
-| Pause-free JS thread   | ✔︎      | ✔︎  | Heavy work happens in Kotlin/Swift on background queues.                  |
-
-## 📦 Installation
+## Install
 
 ```sh
-# 1) Library + peer dependency
-npm i react-native-nitro-media-kit react-native-nitro-modules
-
-# 2) iOS pods
+npm install react-native-nitro-media-kit react-native-nitro-modules@0.37.1
 cd ios && pod install
 ```
 
-`react-native-nitro-modules` is required (this library is a Nitro Module).
+Requires React Native 0.77+, Nitro Modules `>=0.37.1 <0.38.0`, iOS 15.1+ (or your React Native version's higher minimum), and Android API 24+. Android needs compile SDK 36+, JDK 17 and the React Native NDK/CMake toolchain. Rebuild the native app after installation or upgrading. This package does not run in Expo Go.
 
-### Android requirements
-
-- Android builds use CMake/NDK (via Nitro). Make sure your RN Android toolchain is set up with the NDK installed.
-
-## 🏁 Quick-start
+## Use
 
 ```ts
 import {
-  convertImageToVideo,
-  mergeVideos,
+  compressMedia,
   watermarkVideo,
+  extractThumbnail,
+  trimVideo,
+  removeAudio,
+  deleteGeneratedFile,
 } from 'react-native-nitro-media-kit';
 
-// 1️⃣ Turn a PNG into a 5-second clip
-const result1 = await convertImageToVideo('https://example.com/banner.png', 5);
-if (!result1.ok) throw new Error(result1.error?.message ?? 'Convert failed');
-const video1 = result1.outputUri!;
+const marked = await watermarkVideo('/path/to/video.mp4', '© My brand', {
+  position: 'bottom-right',
+  color: '#FFFFFFCC',
+  margin: 24,
+});
+if (!marked.ok || !marked.outputUri) {
+  throw new Error(marked.error?.message ?? 'Watermark failed');
+}
 
-// 2️⃣ Add a watermark bottom-right
-const result2 = await watermarkVideo(
-  video1,
-  '© ACME Corp',
-  'bottom-right' // top-left | top-right | bottom-left | bottom-right | center
-);
-if (!result2.ok) throw new Error(result2.error?.message ?? 'Watermark failed');
-const watermarked = result2.outputUri!;
+const preview = await extractThumbnail(marked.outputUri, {
+  timeMs: 500,
+  maxLongEdge: 1280,
+  quality: 0.9,
+});
+const clip = await trimVideo(marked.outputUri, { startMs: 0, endMs: 1000 });
+const muted = await removeAudio(marked.outputUri);
+const smaller = await compressMedia(marked.outputUri, {
+  preset: 'balanced',
+  video: { maxLongEdge: 1280, maxFps: 30 },
+});
 
-// 3️⃣ Merge with an existing clip
-const result3 = await mergeVideos([
-  watermarked,
-  '/storage/emulated/0/DCIM/clip.mp4',
-]);
-if (!result3.ok) throw new Error(result3.error?.message ?? 'Merge failed');
-const final = result3.outputUri!;
-
-console.log('Done! ->', final);
+// Copy outputs into your own storage if they must persist.
+await deleteGeneratedFile(marked.outputUri);
 ```
 
-## 🧾 Return Type
+Inputs accept absolute paths, percent-encoded `file://` URIs, and HTTP(S) URLs. Android also accepts readable `content://` URIs. Grant content-provider access before calling. Remote inputs stream to temporary disk storage with connection/read timeouts; temporary inputs are deleted when their operation ends. Repeated URLs within a job share the same download.
 
-All methods return the same shape: `Promise<MediaInfoResult>`.
+All processing methods resolve to `MediaInfoResult`. Check `ok` before using outputs. Invalid arguments/media produce `ok: false` with an error. Nitro argument conversion or native initialization can also throw/reject. `deleteGeneratedFile` rejects invalid deletion requests.
 
 ```ts
-export type MediaInfoResult = {
+type MediaInfoResult = {
   ok: boolean;
-
-  /** What operation produced this result */
-  operation:
-    | 'getMediaInfo'
-    | 'convertImageToVideo'
-    | 'watermarkVideo'
-    | 'mergeVideos'
-    | 'splitVideo';
-
-  /** Media type */
+  operation: OperationType;
   type: 'image' | 'video';
-
-  /** Input media */
   inputUri?: string;
-
-  /** Output media (if generated) */
   outputUri?: string;
-
-  /** Output media list (used by splitVideo) */
   segments?: string[];
-
-  /** Core media info (images will only provide width/height) */
   media?: {
-    durationMs?: number; // video only
+    durationMs?: number;
     width?: number;
     height?: number;
-    fps?: number; // video only
+    fps?: number;
+    format?: string;
+    sizeBytes?: number;
+    audioTracks?: number;
+    videoTracks?: number;
   };
+  warnings?: { code: string; message: string }[];
+  error?: { code: string; message: string };
+};
+```
 
-  /** Error info when ok = false */
-  error?: {
-    code: string;
-    message: string;
+Dimensions describe displayed pixels after orientation. Image results omit duration/FPS. Output metadata is inspected after export completes. Multi-output split results contain `segments` in request order.
+
+## API
+
+| Function                                    | Behavior                                                                                                                                                                                 |
+| ------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `getMediaInfo(uri)`                         | Reads image/video metadata without decoding full-size images.                                                                                                                            |
+| `compressMedia(uri, options?)`              | Detects input type and applies an image/video compression plan.                                                                                                                          |
+| `convertImageToVideo(uri, durationSeconds)` | Creates a silent H.264 MP4 at 30 FPS, capped at a 1920-pixel long edge. Duration must be finite and in `(0, 86400]`. Short/fractional durations round up to a whole frame.               |
+| `watermarkVideo(uri, text, options?)`       | Renders text into actual video frames on devices and simulators, retaining primary audio.                                                                                                |
+| `mergeVideos(uris)`                         | Concatenates a nonempty list; fits each clip to the first clip's aspect ratio, capped at a 1920-pixel long edge. Letterboxes different aspect ratios. Missing audio creates silent gaps. |
+| `splitVideo(uri, segments)`                 | Exports one clip per range. All ranges are validated before exporting; a failure removes every partial output from that job.                                                             |
+| `trimVideo(uri, segment)`                   | Exports a single requested range.                                                                                                                                                        |
+| `removeAudio(uri)`                          | Exports video without audio. Uses passthrough when the native pipeline supports it.                                                                                                      |
+| `extractThumbnail(uri, options?)`           | Creates an oriented JPEG preview.                                                                                                                                                        |
+| `deleteGeneratedFile(uri)`                  | Deletes one generated output, returning `false` if already absent. Caller-owned inputs cannot be deleted.                                                                                |
+
+Video output uses MP4. Re-encoding uses native codecs; capabilities and codec fallback depend on the device. Android exports target H.264/AAC and tone-map HDR to SDR. HDR/color fidelity and exact frame boundaries need validation with your source formats and target devices. This is a file-processing API; it does not maintain an editor timeline or expose cancellation/progress.
+
+### Watermarks
+
+```ts
+type WatermarkOptions = {
+  position?:
+    'top-left' | 'top-right' | 'bottom-left' | 'bottom-right' | 'center';
+  fontSize?: number; // output pixels, 1..512; default 5% of the shorter side
+  color?: string; // #RRGGBB or #RRGGBBAA, default white
+  opacity?: number; // 0..1, default 1; multiplied by color alpha
+  margin?: number; // output pixels, default 2.5% of the shorter side
+};
+```
+
+The default position is bottom-right. Text supports multiple lines, wraps within the available width, and shrinks if necessary to fit the video. Empty/whitespace-only text and text over 4096 UTF-16 code units are rejected. Margin must leave room on both axes. Font rendering can differ between Android and iOS.
+
+### Compression
+
+```ts
+type CompressMediaOptions = {
+  preset?: 'auto' | 'high' | 'balanced' | 'small'; // default auto
+  preserveMetadata?: boolean; // default false
+  image?: {
+    format?: 'auto' | 'jpeg' | 'png'; // auto preserves transparency via PNG
+    quality?: number; // 0..1; ignored for PNG, with a warning
+    maxLongEdge?: number; // positive, <=8192; never enlarges the source
+  };
+  video?: {
+    maxLongEdge?: number; // positive, <=8192
+    maxFps?: number; // finite and positive; never increases source FPS
+    videoBitrateKbps?: number;
+    audioBitrateKbps?: number;
+    keepAudio?: boolean; // default true
   };
 };
 ```
 
-Notes:
+`auto` adapts to source size/duration. `high`, `balanced`, and `small` trade resolution/bitrate for file size. Explicit settings override the preset within native limits. Compression does not guarantee a smaller file; inspect `warnings` and `media.sizeBytes`. PNG is lossless, so `quality` does not reduce PNG size. Metadata preservation is partial and platform-dependent; explicit preservation may retain EXIF/GPS. Orientation is applied to image pixels and normalized in output metadata.
 
-- For **images**, `durationMs` and `fps` are **omitted** (left `undefined`) — only `width`/`height` are returned.
-- For operations that generate one file (`convertImageToVideo`, `watermarkVideo`, `mergeVideos`), `outputUri` contains the created file path.
-- For `splitVideo`, `segments` contains the generated file paths in request order.
-
-## 🗂️ API Reference
-
-### `getMediaInfo(inputUri: string): Promise<MediaInfoResult>`
-
-Reads metadata for images or videos and returns a `MediaInfoResult`.
-
-| Param      | Type     | Description                                         |
-| ---------- | -------- | --------------------------------------------------- |
-| `inputUri` | `string` | Local absolute path or remote URL (`http`/`https`). |
-
-Returns: `Promise<MediaInfoResult>`.
-
-### `convertImageToVideo(image: string, duration: number): Promise<MediaInfoResult>`
-
-| Param      | Type     | Description                                         |
-| ---------- | -------- | --------------------------------------------------- |
-| `image`    | `string` | Local absolute path or remote URL (`http`/`https`). |
-| `duration` | `number` | Length of the generated video in seconds.           |
-
-Returns: `Promise<MediaInfoResult>` — `outputUri` holds the absolute path to the newly created MP4.
-
-Under the hood the image is resized to the nearest supported H.264 resolution while preserving aspect ratio.
-
-### `mergeVideos(videos: string[]): Promise<MediaInfoResult>`
-
-Concatenates multiple MP4s into a single file. Videos with mismatched width/height/fps are re-encoded transparently.
-
-| Param    | Type       | Description                   |
-| -------- | ---------- | ----------------------------- |
-| `videos` | `string[]` | Array of local paths or URLs. |
-
-Returns: `Promise<MediaInfoResult>` — `outputUri` holds the path to the merged file.
-
-### `splitVideo(video: string, segments: Array<{ startMs: number; endMs: number }>): Promise<MediaInfoResult>`
-
-Splits a source video into multiple clips.
-
-| Param      | Type                                      | Description                             |
-| ---------- | ----------------------------------------- | --------------------------------------- |
-| `video`    | `string`                                  | Source MP4 path or URL.                 |
-| `segments` | `Array<{ startMs: number; endMs: number }>` | Segment ranges in milliseconds.         |
-
-Returns: `Promise<MediaInfoResult>` — `segments` contains output paths in the same order as requested.
-
-Example:
+### Ranges and thumbnails
 
 ```ts
-const result = await splitVideo('/path/to/video.mp4', [
-  { startMs: 0, endMs: 6_000 },
-  { startMs: 10_000, endMs: 18_000 },
-  { startMs: 30_000, endMs: 42_000 },
-]);
-
-if (!result.ok) throw new Error(result.error?.message ?? 'Split failed');
-console.log(result.segments); // ['/.../split_*.mp4', '/.../split_*.mp4', '/.../split_*.mp4']
+type VideoSegment = { startMs: number; endMs: number };
+type ThumbnailOptions = {
+  timeMs?: number; // default 0; 0 <= timeMs < duration
+  maxLongEdge?: number; // default 1280; 1..8192
+  quality?: number; // default 0.9; 0..1
+};
 ```
 
-### `watermarkVideo(video: string, watermark: string, position: string): Promise<MediaInfoResult>`
+Ranges must satisfy `0 <= startMs < endMs <= durationMs` with finite numbers. Invalid ranges fail; they are not clamped or rounded to earlier keyframes. Native exporters can quantize cuts to media time/sample boundaries. Thumbnail selection uses the closest decodable frame.
 
-Adds a text watermark to any corner (or centre).
+### File lifetime and concurrency
 
-| Param       | Type     | Description                                                              |
-| ----------- | -------- | ------------------------------------------------------------------------ |
-| `video`     | `string` | Source MP4 path or URL.                                                  |
-| `watermark` | `string` | The text to render.                                                      |
-| `position`  | `string` | One of `top-left`, `top-right`, `bottom-left`, `bottom-right`, `center`. |
+Generated outputs live in the app's `nitro-media-kit/output` cache directory with unique UUID filenames. They survive subsequent calls, but the OS can evict cache files. Copy files to app-owned permanent storage before retaining/sharing them long-term. Use `deleteGeneratedFile` for prompt cleanup. Failed jobs remove partial outputs; successful split jobs keep all requested clips.
 
-Returns: `Promise<MediaInfoResult>` — `outputUri` holds the path to the water-marked file.
+A native queue serializes jobs across HybridObject instances to bound memory use and hardware codec contention. File I/O, image decoding, and media processing stay off the JavaScript thread. Android Transformer control callbacks use its required application looper; media work runs in native worker threads.
 
-## ⚠️ Troubleshooting
+## Migrating to 0.4
 
-| Symptom                                           | Fix                                                                                    |
-| ------------------------------------------------- | -------------------------------------------------------------------------------------- |
-| `IllegalArgumentException: No video track found…` | Ensure the input is an MP4 (H.264). Other containers aren’t supported yet.             |
-| Black video on Android                            | Some hardware codecs dislike odd dimensions. Prefer even-number sizes (e.g. 1280×720). |
-| iOS export stuck at 0%                            | Check free disk space — AVFoundation can fail when temp space is low.                  |
+- Upgrade Nitro runtime and Nitrogen together to **0.37.1** and regenerate bindings before building.
+- Replace `watermarkVideo(uri, text, 'bottom-right')` with `watermarkVideo(uri, text, { position: 'bottom-right' })`.
+- Generated outputs now live in the library cache namespace. Persist important outputs explicitly.
+- Invalid/out-of-bounds split ranges now fail instead of being silently clamped or snapped to sync frames.
+- React Native peers now declare a real minimum version instead of `*`.
+- Android uses Media3 Transformer instead of the custom EGL/MediaCodec pipeline.
 
-## 🗺️ Roadmap
+## Development and regression checks
 
-- Arbitrary X/Y watermark coordinates.
-- Font size / style props for `watermarkVideo`.
-- Contributions & PRs welcome!
+Use the Yarn version checked into this repository (`yarn@3.6.1`) and Node from `.nvmrc`.
 
-## 🤝 Contributing
+The example Podfile includes a version-scoped module-map fix for React Native's `glog` 0.3.5 when building Swift/C++ interop from source with Xcode 26. It marks glog's nested includes as textual headers; upstream source files remain untouched.
 
-We follow the Nitro Modules contributing guide. Run examples locally with `yarn example ios` or `yarn example android`.
+```sh
+yarn install --immutable
+yarn nitrogen
+yarn typecheck
+yarn lint
+yarn test --runInBand
+yarn prepare
 
-## 📄 License
+# Android: boot an emulator/device first; use JDK 17.
+yarn test:native:android
 
-MIT © 2025 — Sameer Ather
+# iOS: install pods from example/ios first.
+yarn test:native:ios -destination 'platform=iOS Simulator,name=iPhone 16 Pro'
+```
 
-Made with ❤️ by Sameer Ather & create-react-native-library.
+Native regression tests use small synthetic fixtures under `test-fixtures/`, including mono AAC audio and a rotation-tagged portrait video. They verify real watermark pixels, audio retention, orientation, duration, trimming, compression, and protected input deletion. Run on physical devices as well as emulators before releasing; hardware encoders and fonts differ.
+
+## License
+
+MIT

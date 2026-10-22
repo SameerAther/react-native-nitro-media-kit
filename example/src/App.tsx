@@ -1,114 +1,199 @@
-import { View, StyleSheet, Alert, Button } from 'react-native';
+import { useRef, useState } from 'react';
 import {
+  Button,
+  Image,
+  SafeAreaView,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
+import {
+  compressMedia,
   convertImageToVideo,
+  deleteGeneratedFile,
+  extractThumbnail,
+  getMediaInfo,
   mergeVideos,
+  removeAudio,
   splitVideo,
+  trimVideo,
   watermarkVideo,
 } from 'react-native-nitro-media-kit';
+import type { MediaInfoResult } from 'react-native-nitro-media-kit';
 
 export default function App() {
-  const handleConvertImageToVideo = async () => {
-    try {
-      const result = await convertImageToVideo(
-        'https://unsplash.com/photos/b9-odQi5oDo/download?ixid=M3wxMjA3fDB8MXxzZWFyY2h8Mnx8dXJsfGVufDB8fHx8MTczMjM0MTM2NXww&force=true&w=1920',
-        5
-      );
-      if (!result.ok) {
-        Alert.alert('Error', result.error?.message ?? 'Failed to create video');
-        return;
-      }
-      Alert.alert('Video Created', `Saved at: ${result.outputUri}`);
-      console.log(result.outputUri, 'Video created using Nitro Media Kit');
-    } catch (error) {
-      console.error('Error converting image to video:', error);
-      Alert.alert('Error', 'Failed to create video');
-    }
-  };
+  const [uri, setUri] = useState('');
+  const [otherUri, setOtherUri] = useState('');
+  const [text, setText] = useState('Nitro Media Kit');
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState(
+    'Enter a local path, file:// URI or HTTP(S) URL. Android also supports content://.'
+  );
+  const [thumbnail, setThumbnail] = useState<string>();
+  const generated = useRef(new Set<string>());
 
-  const handleMergeVideos = async () => {
+  async function run(action: () => Promise<MediaInfoResult>) {
+    setBusy(true);
     try {
-      const result = await mergeVideos([
-        'https://www.pexels.com/download/video/4114797/?fps=25.0&h=240&w=426',
-        'https://www.pexels.com/download/video/4114797/?fps=25.0&h=240&w=426',
-        'https://www.pexels.com/download/video/4114797/?fps=25.0&h=240&w=426',
-      ]);
-      console.log('Merge result:', result);
-      if (!result.ok) {
-        Alert.alert('Error', result.error?.message ?? 'Failed to merge videos');
-        return;
+      const response = await action();
+      setResult(JSON.stringify(response, null, 2));
+      if (response.outputUri) generated.current.add(response.outputUri);
+      response.segments?.forEach((path) => generated.current.add(path));
+      if (response.ok && response.operation === 'extractThumbnail') {
+        setThumbnail(`file://${response.outputUri}`);
       }
-      Alert.alert('Merged Video Created', `Saved at: ${result.outputUri}`);
-      console.log('Merged video saved at:', result.outputUri);
     } catch (error) {
-      console.error('Error merging videos:', error);
+      setResult(String(error));
+    } finally {
+      setBusy(false);
     }
-  };
+  }
 
-  const handleWatermark = async () => {
+  async function cleanup() {
+    setBusy(true);
     try {
-      const result = await watermarkVideo(
-        'https://www.pexels.com/download/video/4114797/?fps=25.0&h=240&w=426',
-        'Sameer Ather',
-        'bottom-right'
-      );
-      if (!result.ok) {
-        Alert.alert(
-          'Error',
-          result.error?.message ?? 'Failed to watermark video'
-        );
-        return;
+      for (const path of generated.current) {
+        await deleteGeneratedFile(path);
+        generated.current.delete(path);
       }
-      Alert.alert('Watermarked Video Created', `Saved at: ${result.outputUri}`);
-      console.log('Watermarked video saved at:', result.outputUri);
+      setThumbnail(undefined);
+      setResult('Generated files deleted.');
     } catch (error) {
-      console.error('Error watermarking video:', error);
+      setResult(String(error));
+    } finally {
+      setBusy(false);
     }
-  };
-
-  const handleSplitVideo = async () => {
-    try {
-      const result = await splitVideo(
-        'https://www.pexels.com/download/video/4114797/?fps=25.0&h=240&w=426',
-        [
-          { startMs: 0, endMs: 4_000 },
-          { startMs: 2_000, endMs: 6_000 },
-        ]
-      );
-      console.log('Split result:', result);
-      if (!result.ok) {
-        Alert.alert('Error', result.error?.message ?? 'Failed to split video');
-        return;
-      }
-
-      const outputSegments = result.segments ?? [];
-      Alert.alert(
-        'Video Split Complete',
-        `Created ${outputSegments.length} segments`
-      );
-      console.log('Split segment paths:', outputSegments);
-    } catch (error) {
-      console.error('Error splitting video:', error);
-      Alert.alert('Error', 'Failed to split video');
-    }
-  };
+  }
 
   return (
-    <View style={styles.container}>
-      <Button
-        title="Convert Image to Video"
-        onPress={handleConvertImageToVideo}
-      />
-      <Button title="Merge Videos" onPress={handleMergeVideos} />
-      <Button title="Watermark Video" onPress={handleWatermark} />
-      <Button title="Split Video" onPress={handleSplitVideo} />
-    </View>
+    <SafeAreaView style={styles.screen}>
+      <ScrollView
+        contentContainerStyle={styles.content}
+        keyboardShouldPersistTaps="handled"
+      >
+        <Text style={styles.title}>Nitro Media Kit</Text>
+        <Text>Media input</Text>
+        <TextInput
+          style={styles.input}
+          value={uri}
+          onChangeText={setUri}
+          autoCapitalize="none"
+          autoCorrect={false}
+          placeholder="/path/to/media or https://…"
+        />
+        <Text>Second video for merging</Text>
+        <TextInput
+          style={styles.input}
+          value={otherUri}
+          onChangeText={setOtherUri}
+          autoCapitalize="none"
+          autoCorrect={false}
+          placeholder="Second video URI"
+        />
+        <Text>Watermark text</Text>
+        <TextInput style={styles.input} value={text} onChangeText={setText} />
+        <View style={styles.actions}>
+          <Button
+            disabled={busy}
+            title="Inspect media"
+            onPress={() => run(() => getMediaInfo(uri))}
+          />
+          <Button
+            disabled={busy}
+            title="Compress media"
+            onPress={() =>
+              run(() => compressMedia(uri, { preset: 'balanced' }))
+            }
+          />
+          <Button
+            disabled={busy}
+            title="Image → 2-second video"
+            onPress={() => run(() => convertImageToVideo(uri, 2))}
+          />
+          <Button
+            disabled={busy}
+            title="Watermark video"
+            onPress={() =>
+              run(() =>
+                watermarkVideo(uri, text, {
+                  position: 'bottom-right',
+                  opacity: 0.9,
+                })
+              )
+            }
+          />
+          <Button
+            disabled={busy}
+            title="Merge two videos"
+            onPress={() => run(() => mergeVideos([uri, otherUri]))}
+          />
+          <Button
+            disabled={busy}
+            title="Trim first second"
+            onPress={() =>
+              run(() => trimVideo(uri, { startMs: 0, endMs: 1000 }))
+            }
+          />
+          <Button
+            disabled={busy}
+            title="Split first two seconds"
+            onPress={() =>
+              run(() =>
+                splitVideo(uri, [
+                  { startMs: 0, endMs: 1000 },
+                  { startMs: 1000, endMs: 2000 },
+                ])
+              )
+            }
+          />
+          <Button
+            disabled={busy}
+            title="Remove audio"
+            onPress={() => run(() => removeAudio(uri))}
+          />
+          <Button
+            disabled={busy}
+            title="Extract thumbnail"
+            onPress={() =>
+              run(() => extractThumbnail(uri, { maxLongEdge: 640 }))
+            }
+          />
+          <Button
+            disabled={busy}
+            title="Delete generated files"
+            onPress={cleanup}
+          />
+        </View>
+        {busy && <Text accessibilityLiveRegion="polite">Processing…</Text>}
+        {thumbnail && (
+          <Image
+            source={{ uri: thumbnail }}
+            style={styles.thumbnail}
+            resizeMode="contain"
+          />
+        )}
+        <Text selectable style={styles.result}>
+          {result}
+        </Text>
+      </ScrollView>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
+  screen: { flex: 1, backgroundColor: '#fff' },
+  content: { padding: 20, gap: 12 },
+  title: { fontSize: 28, fontWeight: '700', color: '#111' },
+  input: {
+    borderWidth: 1,
+    borderColor: '#aaa',
+    borderRadius: 8,
+    padding: 12,
+    color: '#111',
   },
+  actions: { gap: 8 },
+  thumbnail: { width: '100%', height: 240 },
+  result: { fontFamily: 'monospace', fontSize: 12, color: '#222' },
 });

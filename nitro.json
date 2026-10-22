@@ -9,8 +9,14 @@
   },
   "autolinking": {
     "NitroMediaKit": {
-      "swift": "NitroMediaKit",
-      "kotlin": "NitroMediaKit"
+      "ios": {
+        "language": "swift",
+        "implementationClassName": "NitroMediaKit"
+      },
+      "android": {
+        "language": "kotlin",
+        "implementationClassName": "NitroMediaKit"
+      }
     }
   },
   "ignorePaths": ["node_modules"]
