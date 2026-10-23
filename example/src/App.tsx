@@ -11,6 +11,7 @@ import {
 } from 'react-native';
 import {
   compressMedia,
+  createVideoJob,
   convertImageToVideo,
   deleteGeneratedFile,
   extractThumbnail,
@@ -21,7 +22,7 @@ import {
   trimVideo,
   watermarkVideo,
 } from 'react-native-nitro-media-kit';
-import type { MediaInfoResult } from 'react-native-nitro-media-kit';
+import type { MediaInfoResult, VideoJob } from 'react-native-nitro-media-kit';
 
 export default function App() {
   const [uri, setUri] = useState('');
@@ -33,6 +34,33 @@ export default function App() {
   );
   const [thumbnail, setThumbnail] = useState<string>();
   const generated = useRef(new Set<string>());
+  const activeJob = useRef<VideoJob | null>(null);
+  const [progress, setProgress] = useState('');
+
+  async function combinedExport() {
+    return run(async () => {
+      const job = createVideoJob(
+        uri,
+        {
+          trim: { startMs: 0, endMs: 1000 },
+          watermark: text,
+          preset: 'high',
+          video: { maxLongEdge: 1920, colorPolicy: 'preserve' },
+        },
+        (event) =>
+          setProgress(
+            `${event.stage}${event.fraction === undefined ? '' : ` ${Math.round(event.fraction * 100)}%`}`
+          )
+      );
+      activeJob.current = job;
+      try {
+        return await job.result;
+      } finally {
+        activeJob.current = null;
+        setProgress('');
+      }
+    });
+  }
 
   async function run(action: () => Promise<MediaInfoResult>) {
     setBusy(true);
@@ -95,6 +123,20 @@ export default function App() {
         <Text>Watermark text</Text>
         <TextInput style={styles.input} value={text} onChangeText={setText} />
         <View style={styles.actions}>
+          <Button
+            disabled={busy}
+            title="Trim + watermark + resize"
+            onPress={combinedExport}
+          />
+          <Button
+            disabled={!busy || !activeJob.current}
+            title="Cancel export"
+            onPress={() => {
+              activeJob.current
+                ?.cancel()
+                .catch((error) => setResult(String(error)));
+            }}
+          />
           <Button
             disabled={busy}
             title="Inspect media"
@@ -166,7 +208,11 @@ export default function App() {
             onPress={cleanup}
           />
         </View>
-        {busy && <Text accessibilityLiveRegion="polite">Processing…</Text>}
+        {busy && (
+          <Text accessibilityLiveRegion="polite">
+            {progress || 'Processing…'}
+          </Text>
+        )}
         {thumbnail && (
           <Image
             source={{ uri: thumbnail }}

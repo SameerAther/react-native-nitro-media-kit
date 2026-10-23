@@ -49,17 +49,54 @@ class MediaPipelineTest {
             assertEquals(1.0, result.media?.audioTracks)
             assertEquals(if (name == "portrait") 180.0 else 320.0, result.media?.width)
             assertEquals(if (name == "portrait") 320.0 else 180.0, result.media?.height)
-            val thumbnail = output(kit.extractThumbnail(path, null).await())
-            val bitmap = requireNotNull(BitmapFactory.decodeFile(thumbnail))
-            try {
-                var whitePixels = 0
-                for (y in 0 until bitmap.height) for (x in 0 until bitmap.width) {
-                    val pixel = bitmap.getPixel(x, y)
-                    if (android.graphics.Color.red(pixel) > 180 && android.graphics.Color.green(pixel) > 180 && android.graphics.Color.blue(pixel) > 180) whitePixels++
-                }
-                assertTrue("Watermark must alter real frames", whitePixels > 50)
-            } finally { bitmap.recycle() }
+            assertEquals(10.0, requireNotNull(result.media?.fps), 0.05)
+            for (index in 0 until 20) {
+                val extracted = kit.extractThumbnail(path, ThumbnailOptions(index * 100.0, null, 1.0, ThumbnailPrecision.PRECISE)).await()
+                val thumbnail = output(extracted)
+                assertEquals(index * 100.0, requireNotNull(extracted.actualTimeMs), 1.0)
+                val bitmap = requireNotNull(BitmapFactory.decodeFile(thumbnail))
+                try {
+                    var whitePixels = 0
+                    for (y in 0 until bitmap.height) for (x in 0 until bitmap.width) {
+                        val pixel = bitmap.getPixel(x, y)
+                        if (android.graphics.Color.red(pixel) > 180 && android.graphics.Color.green(pixel) > 180 && android.graphics.Color.blue(pixel) > 180) whitePixels++
+                    }
+                    assertTrue("Watermark missing at frame $index", whitePixels > 50)
+                } finally { bitmap.recycle() }
+            }
         }
+    }
+
+    private fun videoTimes(path: String): List<Long> {
+        val extractor = android.media.MediaExtractor()
+        return try {
+            extractor.setDataSource(path)
+            val track = (0 until extractor.trackCount).first { extractor.getTrackFormat(it).getString(android.media.MediaFormat.KEY_MIME)?.startsWith("video/") == true }
+            extractor.selectTrack(track)
+            buildList { while (extractor.sampleTime >= 0) { add(extractor.sampleTime); extractor.advance() } }.sorted()
+        } finally { extractor.release() }
+    }
+
+    @Test fun combinedExportHasConstantTimingAndPreservesMonoAudio() = runBlocking {
+        val result = kit.exportVideo(fixture("landscape"), ExportVideoOptions(VideoSegment(500.0, 1500.0), "VISIBLE",
+            WatermarkOptions(WatermarkPosition.TOP_LEFT, 12.0, "#FFFFFFFF", 1.0, 4.0), CompressionPreset.HIGH,
+            CompressVideoOptions(160.0, 20.0, null, null, null, VideoCodec.H264, ColorPolicy.SDR, FrameRatePolicy.CONSTANT, null),
+            AudioPolicy.PRESERVE, false, null), "combined-regression", null).await()
+        val path = output(result)
+        assertEquals(160.0, result.media?.width)
+        assertEquals(1.0, result.media?.audioChannels)
+        assertEquals(VideoProcessingPath.ENCODED, result.diagnostics?.videoPath)
+        val times = videoTimes(path)
+        assertEquals(20, times.size)
+        times.forEachIndexed { index, time -> assertEquals(index * 50_000.0, (time - times.first()).toDouble(), 100.0) }
+    }
+
+    @Test fun watermarkPreservesVariablePresentationTimes() = runBlocking {
+        val source = fixture("motion-vfr")
+        val result = output(kit.watermarkVideo(source, "VFR", null).await())
+        val before = videoTimes(source); val after = videoTimes(result)
+        assertEquals(before.size, after.size)
+        before.zip(after).forEach { (a, b) -> assertEquals((a - before.first()).toDouble(), (b - after.first()).toDouble(), 100.0) }
     }
 
     @Test fun compressionStripsLocationUnlessExplicitlyPreserved() = runBlocking {

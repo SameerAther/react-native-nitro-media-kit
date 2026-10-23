@@ -1,6 +1,6 @@
 {
   "name": "react-native-nitro-media-kit",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Hardware-accelerated image and video processing powered by Nitro Modules",
   "main": "./lib/module/index.js",
   "types": "./lib/typescript/src/index.d.ts",
@@ -32,7 +32,8 @@
     "!**/__mocks__",
     "!**/.*",
     "!android/src/androidTest",
-    "!**/node_modules*/**"
+    "!**/node_modules*/**",
+    "!android/src/test"
   ],
   "scripts": {
     "example": "yarn workspace react-native-nitro-media-kit-example",
@@ -44,7 +45,11 @@
     "test": "jest",
     "release": "release-it --only-version",
     "test:native:android": "cd example/android && ./gradlew :app:connectedDebugAndroidTest",
-    "test:native:ios": "xcodebuild -workspace example/ios/NitroMediaKitExample.xcworkspace -scheme NitroMediaKitExample -configuration Debug test"
+    "test:native:ios": "xcodebuild -workspace example/ios/NitroMediaKitExample.xcworkspace -scheme NitroMediaKitExample -configuration Debug test",
+    "test:host:android": "cd example/android && ./gradlew :react-native-nitro-media-kit:testDebugUnitTest --max-workers=2",
+    "test:host:ios": "bash scripts/test-swift-host.sh",
+    "test:validator": "python3 scripts/test-media-validator.py",
+    "fixtures:generate": "python3 scripts/generate-media-fixtures.py"
   },
   "keywords": [
     "react-native",

@@ -18,6 +18,12 @@
 		D59D67924DBC533BB75AFEC9 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 13B07FB81A68108700A75B9A /* PrivacyInfo.xcprivacy */; };
 		EE4BDA35D4F4FD14F1842F21 /* MediaPipelineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA23859668ACFCC6A694120F /* MediaPipelineTests.swift */; };
 		F950CBC802D603401C559CB1 /* photo.png in Resources */ = {isa = PBXBuildFile; fileRef = D9E7BBED548ACF591528AD89 /* photo.png */; };
+		77027F3CEBAF4525301241C8 /* motion.mp4 in Resources */ = {isa = PBXBuildFile; fileRef = 1A4F24AE5548A5167B491787 /* motion.mp4 */; };
+		D74133BAB853738901116CA1 /* motion-vfr.mp4 in Resources */ = {isa = PBXBuildFile; fileRef = 3FF3A2F4BD812EFB127A7EEC /* motion-vfr.mp4 */; };
+		70DB6776D08858A71E89F1B6 /* motion-fractional.mp4 in Resources */ = {isa = PBXBuildFile; fileRef = C7FB98FB596C0A9540AF36E1 /* motion-fractional.mp4 */; };
+		A2921BDF5D5B6D8BA462BFD8 /* delayed-audio.mp4 in Resources */ = {isa = PBXBuildFile; fileRef = 1FB7640F1FB63E88A810EF9B /* delayed-audio.mp4 */; };
+		EFB4213AFA286491209F8F94 /* hdr-hlg.mp4 in Resources */ = {isa = PBXBuildFile; fileRef = 973A78E040138E22EB606489 /* hdr-hlg.mp4 */; };
+		AC9D115A2E84DA238706FFD9 /* hdr-pq.mp4 in Resources */ = {isa = PBXBuildFile; fileRef = 0E9A3F7AADFF6A719A48A98C /* hdr-pq.mp4 */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -52,6 +58,12 @@
 		ED297162215061F000B7C4FE /* JavaScriptCore.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = JavaScriptCore.framework; path = System/Library/Frameworks/JavaScriptCore.framework; sourceTree = SDKROOT; };
 		F262B08777DD95BCDA9E4AB6 /* landscape.mp4 */ = {isa = PBXFileReference; includeInIndex = 1; path = landscape.mp4; sourceTree = "<group>"; };
 		FA23859668ACFCC6A694120F /* MediaPipelineTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MediaPipelineTests.swift; sourceTree = "<group>"; };
+		1A4F24AE5548A5167B491787 /* motion.mp4 */ = {isa = PBXFileReference; lastKnownFileType = file; path = "motion.mp4"; sourceTree = "<group>"; };
+		3FF3A2F4BD812EFB127A7EEC /* motion-vfr.mp4 */ = {isa = PBXFileReference; lastKnownFileType = file; path = "motion-vfr.mp4"; sourceTree = "<group>"; };
+		C7FB98FB596C0A9540AF36E1 /* motion-fractional.mp4 */ = {isa = PBXFileReference; lastKnownFileType = file; path = "motion-fractional.mp4"; sourceTree = "<group>"; };
+		1FB7640F1FB63E88A810EF9B /* delayed-audio.mp4 */ = {isa = PBXFileReference; lastKnownFileType = file; path = "delayed-audio.mp4"; sourceTree = "<group>"; };
+		973A78E040138E22EB606489 /* hdr-hlg.mp4 */ = {isa = PBXFileReference; lastKnownFileType = file; path = "hdr-hlg.mp4"; sourceTree = "<group>"; };
+		0E9A3F7AADFF6A719A48A98C /* hdr-pq.mp4 */ = {isa = PBXFileReference; lastKnownFileType = file; path = "hdr-pq.mp4"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -111,6 +123,12 @@
 			isa = PBXGroup;
 			children = (
 				F262B08777DD95BCDA9E4AB6 /* landscape.mp4 */,
+				0E9A3F7AADFF6A719A48A98C /* hdr-pq.mp4 */,
+				973A78E040138E22EB606489 /* hdr-hlg.mp4 */,
+				1FB7640F1FB63E88A810EF9B /* delayed-audio.mp4 */,
+				C7FB98FB596C0A9540AF36E1 /* motion-fractional.mp4 */,
+				3FF3A2F4BD812EFB127A7EEC /* motion-vfr.mp4 */,
+				1A4F24AE5548A5167B491787 /* motion.mp4 */,
 				51D04954D9C1F7662F904982 /* portrait.mp4 */,
 				D9E7BBED548ACF591528AD89 /* photo.png */,
 			);
@@ -262,6 +280,12 @@
 			buildActionMask = 2147483647;
 			files = (
 				282D4A3BADD62565F8FDAED4 /* landscape.mp4 in Resources */,
+				AC9D115A2E84DA238706FFD9 /* hdr-pq.mp4 in Resources */,
+				EFB4213AFA286491209F8F94 /* hdr-hlg.mp4 in Resources */,
+				A2921BDF5D5B6D8BA462BFD8 /* delayed-audio.mp4 in Resources */,
+				70DB6776D08858A71E89F1B6 /* motion-fractional.mp4 in Resources */,
+				D74133BAB853738901116CA1 /* motion-vfr.mp4 in Resources */,
+				77027F3CEBAF4525301241C8 /* motion.mp4 in Resources */,
 				9C4F6CA940B464C7BDBA69BC /* portrait.mp4 in Resources */,
 				F950CBC802D603401C559CB1 /* photo.png in Resources */,
 			);

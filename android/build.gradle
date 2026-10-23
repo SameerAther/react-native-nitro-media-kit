@@ -122,6 +122,7 @@ repositories {
 def kotlin_version = getExtOrDefault("kotlinVersion")
 
 dependencies {
+  testImplementation "junit:junit:4.13.2"
   implementation "com.facebook.react:react-android"
   implementation "org.jetbrains.kotlin:kotlin-stdlib:$kotlin_version"
   implementation project(":react-native-nitro-modules")
@@ -129,4 +130,5 @@ dependencies {
   implementation "androidx.exifinterface:exifinterface:1.4.1"
   implementation "androidx.media3:media3-transformer:1.10.1"
   implementation "androidx.media3:media3-effect:1.10.1"
+  implementation "androidx.media3:media3-inspector-frame:1.10.1"
 }

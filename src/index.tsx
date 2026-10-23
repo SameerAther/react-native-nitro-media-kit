@@ -1,26 +1,9 @@
-import { NitroModules } from 'react-native-nitro-modules';
+import { NitroMediaKit } from './native';
 import type { NitroMediaKit as NitroMediaKitObject } from './NitroMediaKit.nitro';
 
-export type {
-  CompressImageFormat,
-  CompressImageOptions,
-  CompressionPreset,
-  CompressMediaOptions,
-  CompressVideoOptions,
-  MediaInfoResult,
-  MediaInfoWarning,
-  MediaInfoError,
-  MediaInfoMedia,
-  MediaType,
-  OperationType,
-  ThumbnailOptions,
-  WatermarkOptions,
-  WatermarkPosition,
-  VideoSegment,
-} from './NitroMediaKit.nitro';
+export type * from './NitroMediaKit.nitro';
 
-export const NitroMediaKit =
-  NitroModules.createHybridObject<NitroMediaKitObject>('NitroMediaKit');
+export { NitroMediaKit } from './native';
 
 export const getMediaInfo: NitroMediaKitObject['getMediaInfo'] = (inputUri) =>
   NitroMediaKit.getMediaInfo(inputUri);
@@ -63,3 +46,6 @@ export const extractThumbnail: NitroMediaKitObject['extractThumbnail'] = (
 export const deleteGeneratedFile: NitroMediaKitObject['deleteGeneratedFile'] = (
   uri
 ) => NitroMediaKit.deleteGeneratedFile(uri);
+
+export { createVideoJob, exportVideo } from './jobs';
+export type { VideoJob } from './jobs';

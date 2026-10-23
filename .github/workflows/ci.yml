@@ -6,6 +6,12 @@ on:
   pull_request:
     branches:
       - main
+  workflow_dispatch:
+    inputs:
+      run_native_runtime:
+        description: Run opt-in device/emulator media regression tests
+        type: boolean
+        default: false
   merge_group:
     types:
       - checks_requested
@@ -81,7 +87,6 @@ jobs:
           fi
 
       - name: Install JDK
-        if: env.turbo_cache_hit != 1
         uses: actions/setup-java@c5195efecf7bdfc987ee8bae7a71cb8b11521c00 # v4.7.1
         with:
           distribution: 'zulu'
@@ -108,6 +113,18 @@ jobs:
           JAVA_OPTS: '-XX:MaxHeapSize=6g'
         run: |
           yarn turbo run build:android --cache-dir="${{ env.TURBO_CACHE_DIR }}"
+
+      - name: Run host JVM pipeline checks
+        run: yarn test:host:android
+
+  validate-media-tools:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - name: Install FFmpeg
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+      - name: Check temporal validator and fixture properties
+        run: python3 scripts/test-media-validator.py
 
   build-ios:
     runs-on: macos-15
@@ -159,13 +176,21 @@ jobs:
           cd example/ios
           bundle exec pod install
 
+      - name: Run host Swift pipeline checks
+        run: bash scripts/test-swift-host.sh
+
+      - name: Compile app and native regression tests
+        run: xcodebuild -workspace example/ios/NitroMediaKitExample.xcworkspace -scheme NitroMediaKitExample -configuration Debug -destination 'generic/platform=iOS Simulator' -jobs 2 CODE_SIGNING_ALLOWED=NO build-for-testing
+
       - name: Run native media regression tests
+        if: github.event_name == 'workflow_dispatch' && inputs.run_native_runtime
         run: |
           set -euo pipefail
           DEVICE_ID=$(xcrun simctl list devices available -j | python3 -c 'import json,sys; devices=json.load(sys.stdin)["devices"]; print(next(d["udid"] for group in devices.values() for d in group if d.get("isAvailable")))')
           yarn test:native:ios -destination "platform=iOS Simulator,id=$DEVICE_ID" -jobs 2 CODE_SIGNING_ALLOWED=NO
 
   test-android-media:
+    if: github.event_name == 'workflow_dispatch' && inputs.run_native_runtime
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683

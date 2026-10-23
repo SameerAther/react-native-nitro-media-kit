@@ -1,192 +1,296 @@
 import Foundation
 @preconcurrency import AVFoundation
 
-/// Each job owns its downloads and outputs until the result is committed.
-final class MediaJob {
+/// Each operation owns a private staging directory. Only verified outputs become public cache files.
+final class MediaJob: @unchecked Sendable {
     @TaskLocal static var current: MediaJob?
-    private var scratch: [URL] = []
+    let control: PipelineControl
+    private let lock = NSLock()
+    private let directory: URL
+    private let root: URL
     private var outputs: [URL] = []
+    private var committed: [URL] = []
     private var resolved: [String: String] = [:]
+    private var leases: Set<String> = []
+    private static let leaseLock = NSLock()
+    private static var inputLeases: [String: Int] = [:]
+    private static var activeDirectories: Set<String> = []
 
-    static func outputDirectory() throws -> URL {
-        let base = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
-        let directory = base.appendingPathComponent("nitro-media-kit/output", isDirectory: true)
+    init(control: PipelineControl, root suppliedRoot: URL? = nil) throws {
+        self.control = control
+        let root = try Self.rootDirectory(base: suppliedRoot)
+        self.root = root
+        let jobs = root.appendingPathComponent("jobs", isDirectory: true)
+        directory = jobs.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        Self.leaseLock.lock(); Self.activeDirectories.insert(directory.path); Self.leaseLock.unlock()
+        control.resourceCheck = { [weak self] in try self?.checkResources() }
+        let cutoff = Date().addingTimeInterval(-86400)
+        for url in (try? FileManager.default.contentsOfDirectory(at: jobs, includingPropertiesForKeys: [.contentModificationDateKey])) ?? [] {
+            Self.leaseLock.lock(); let active = Self.activeDirectories.contains(url.path); Self.leaseLock.unlock()
+            if !active, let date = try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate, date < cutoff { try? FileManager.default.removeItem(at: url) }
+        }
+    }
+    private static func rootDirectory(base: URL? = nil) throws -> URL {
+        let root = base ?? FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0].appendingPathComponent("nitro-media-kit", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        return root
+    }
+    static func outputDirectory(base: URL? = nil) throws -> URL {
+        let directory = try rootDirectory(base: base).appendingPathComponent("output", isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         return directory
     }
-
     func output(_ ext: String) throws -> URL {
-        let url = try Self.outputDirectory().appendingPathComponent(UUID().uuidString.lowercased()).appendingPathExtension(ext)
-        outputs.append(url)
+        try control.check()
+        let url = directory.appendingPathComponent(UUID().uuidString.lowercased()).appendingPathExtension(ext)
+        lock.lock(); outputs.append(url); lock.unlock()
         return url
     }
-
     func resolve(_ source: String) async throws -> String {
-        if let existing = resolved[source] { return existing }
+        if let path = resolved[source] { return path }
+        try control.check()
         guard !source.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { throw Self.error("Input URI must not be empty.") }
         let parsed = URL(string: source)
+        let path: String
         if let url = parsed, ["http", "https"].contains(url.scheme?.lowercased() ?? "") {
-            var request = URLRequest(url: url)
-            request.timeoutInterval = 30
-            // downloadTask streams to disk instead of buffering entire videos in RAM.
-            let (download, response) = try await URLSession.shared.download(for: request)
-            defer { try? FileManager.default.removeItem(at: download) }
-            guard let response = response as? HTTPURLResponse, (200...299).contains(response.statusCode) else {
-                throw Self.error("Media download failed: HTTP \((response as? HTTPURLResponse)?.statusCode ?? 0).")
-            }
-            let ext = url.pathExtension.isEmpty ? "bin" : String(url.pathExtension.prefix(10))
-            let destination = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).appendingPathExtension(ext)
-            scratch.append(destination)
-            try FileManager.default.moveItem(at: download, to: destination)
-            let path = try readablePath(destination.path)
-            resolved[source] = path
-            return path
+            try await MediaWorkGate.io.acquire(control)
+            do {
+                let destination = directory.appendingPathComponent("input-\(UUID().uuidString).bin")
+                try await BoundedDownload.download(url: url, destination: destination, control: control)
+                path = destination.path
+                await MediaWorkGate.io.release()
+            } catch { await MediaWorkGate.io.release(); throw error }
+        } else {
+            if let parsed, parsed.scheme != nil, !parsed.isFileURL { throw Self.error("Unsupported input URI scheme.") }
+            guard source.hasPrefix("/") || parsed?.isFileURL == true else { throw Self.error("Input path must be absolute.") }
+            let url = (parsed?.isFileURL == true ? parsed! : URL(fileURLWithPath: source)).resolvingSymlinksInPath().standardizedFileURL
+            acquireLease(url.path)
+            path = url.path
         }
-        if let url = parsed, url.scheme != nil {
-            guard url.isFileURL else { throw Self.error("Unsupported input URI scheme.") }
-            return try readablePath(url.path)
+        var isDirectory: ObjCBool = false
+        let size = ((try? FileManager.default.attributesOfItem(atPath: path)[.size]) as? NSNumber)?.int64Value ?? 0
+        guard path.hasPrefix("/"), FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory), !isDirectory.boolValue,
+              FileManager.default.isReadableFile(atPath: path), size > 0, size <= control.maxInputBytes else {
+            throw Self.error("Input must be readable, nonempty, and within the input byte budget.")
         }
-        return try readablePath(source)
-    }
-
-    private func readablePath(_ path: String) throws -> String {
-        var directory: ObjCBool = false
-        guard path.hasPrefix("/"), FileManager.default.fileExists(atPath: path, isDirectory: &directory), !directory.boolValue,
-              FileManager.default.isReadableFile(atPath: path),
-              ((try FileManager.default.attributesOfItem(atPath: path)[.size]) as? NSNumber)?.int64Value ?? 0 > 0 else {
-            throw Self.error("Input must be a nonempty readable absolute file path or file:// URI.")
-        }
+        try control.check(); resolved[source] = path
         return path
     }
-
-    func finish(success: Bool) {
-        for url in scratch + (success ? [] : outputs) { try? FileManager.default.removeItem(at: url) }
+    private func acquireLease(_ path: String) {
+        Self.leaseLock.lock(); defer { Self.leaseLock.unlock() }
+        if leases.insert(path).inserted { Self.inputLeases[path, default: 0] += 1 }
     }
-
-    static func deleteOutput(_ source: String) throws -> Bool {
+    private func checkResources() throws {
+        try control.check()
+        let free = (try FileManager.default.attributesOfFileSystem(forPath: directory.path)[.systemFreeSize] as? NSNumber)?.int64Value ?? 0
+        guard free >= control.minFreeDiskBytes else { throw Self.error("Insufficient free disk space.") }
+        lock.lock(); let files = outputs; lock.unlock()
+        for file in files {
+            let size = ((try? FileManager.default.attributesOfItem(atPath: file.path)[.size]) as? NSNumber)?.int64Value ?? 0
+            guard size <= control.maxOutputBytes else { throw Self.error("Output byte budget exceeded.") }
+        }
+    }
+    func commit(_ result: MediaInfoResult) throws -> MediaInfoResult {
+        guard result.ok else { return result }
+        try checkResources()
+        var mapping: [String: String] = [:]
+        for path in (result.outputUri.map { [$0] } ?? []) + (result.segments ?? []) {
+            let file = URL(fileURLWithPath: path)
+            guard outputs.contains(file), ((try FileManager.default.attributesOfItem(atPath: path)[.size]) as? NSNumber)?.int64Value ?? 0 > 0 else { throw Self.error("Invalid staged output.") }
+            let destination = try Self.outputDirectory(base: root).appendingPathComponent(file.lastPathComponent)
+            try FileManager.default.moveItem(at: file, to: destination)
+            committed.append(destination); mapping[path] = destination.path
+        }
+        try control.seal()
+        return MediaInfoResult(ok: result.ok, operation: result.operation, type: result.type, inputUri: result.inputUri,
+            outputUri: result.outputUri.flatMap { mapping[$0] }, segments: result.segments?.compactMap { mapping[$0] },
+            media: result.media, warnings: result.warnings, error: result.error, actualTimeMs: result.actualTimeMs, diagnostics: result.diagnostics)
+    }
+    func finish(success: Bool) {
+        control.resourceCheck = nil
+        if !success { committed.forEach { try? FileManager.default.removeItem(at: $0) } }
+        try? FileManager.default.removeItem(at: directory)
+        Self.leaseLock.lock()
+        Self.activeDirectories.remove(directory.path)
+        for path in leases {
+            let count = (Self.inputLeases[path] ?? 1) - 1
+            if count == 0 { Self.inputLeases.removeValue(forKey: path) } else { Self.inputLeases[path] = count }
+        }
+        Self.leaseLock.unlock(); control.close()
+    }
+    static func deleteOutput(_ source: String, root: URL? = nil) throws -> Bool {
         let url: URL
         if source.hasPrefix("/") { url = URL(fileURLWithPath: source) }
         else if let parsed = URL(string: source), parsed.isFileURL { url = parsed }
-        else { throw error("Expected a generated file path or file:// URI.") }
+        else { throw error("Expected a generated file path or file URI.") }
         let canonical = url.resolvingSymlinksInPath().standardizedFileURL
-        guard canonical.deletingLastPathComponent() == (try outputDirectory()).resolvingSymlinksInPath().standardizedFileURL,
+        guard canonical.deletingLastPathComponent() == (try outputDirectory(base: root)).resolvingSymlinksInPath().standardizedFileURL,
               UUID(uuidString: canonical.deletingPathExtension().lastPathComponent) != nil,
-              ["jpg", "png", "mp4"].contains(canonical.pathExtension) else {
-            throw error("Only files generated by NitroMediaKit can be deleted.")
-        }
+              ["jpg", "png", "mp4"].contains(canonical.pathExtension) else { throw error("Only generated outputs can be deleted.") }
+        leaseLock.lock(); defer { leaseLock.unlock() }
+        guard inputLeases[canonical.path] == nil else { throw error("Output is in use by an active job.") }
         guard FileManager.default.fileExists(atPath: canonical.path) else { return false }
-        try FileManager.default.removeItem(at: canonical)
-        return true
+        try FileManager.default.removeItem(at: canonical); return true
     }
-
-    static func error(_ message: String) -> NSError {
-        NSError(domain: "NitroMediaKit", code: 1, userInfo: [NSLocalizedDescriptionKey: message])
-    }
+    static func error(_ message: String) -> NSError { NSError(domain: "NitroMediaKit", code: 1, userInfo: [NSLocalizedDescriptionKey: message]) }
 }
 
-/// An asynchronous permit avoids blocking Swift's cooperative thread pool while jobs queue.
-actor MediaWorkGate {
-    static let shared = MediaWorkGate()
-    private var busy = false
-    private var waiting: [CheckedContinuation<Void, Never>] = []
-    func acquire() async {
-        if !busy { busy = true; return }
-        await withCheckedContinuation { waiting.append($0) }
-    }
-    func release() {
-        if waiting.isEmpty { busy = false }
-        else { waiting.removeFirst().resume() }
-    }
-}
-
-/// Coordinates terminal states across audio/video writer queues and resumes exactly once.
-private final class SampleTransfer {
+/// Writer callbacks, cancellation and finalization converge on one serial terminal state.
+private final class SampleTransfer: @unchecked Sendable {
     let reader: AVAssetReader
     let writer: AVAssetWriter
     let pairs: [(AVAssetReaderOutput, AVAssetWriterInput)]
+    let control: PipelineControl
+    let duration: Double
+    let maxFps: Double?
+    private var firstVideoTime: Double?
+    private var nextVideoIndex = 0.0
     let continuation: CheckedContinuation<Void, Error>
-    private let lock = NSLock()
     private let queue = DispatchQueue(label: "NitroMediaKit.samples")
     private var remaining: Int
     private var completed = false
-    private var watchdog: DispatchSourceTimer?
+    private var hook: UUID?
     private var keepAlive: SampleTransfer?
-
-    init(reader: AVAssetReader, writer: AVAssetWriter, pairs: [(AVAssetReaderOutput, AVAssetWriterInput)], continuation: CheckedContinuation<Void, Error>) {
-        self.reader = reader; self.writer = writer; self.pairs = pairs
+    init(reader: AVAssetReader, writer: AVAssetWriter, pairs: [(AVAssetReaderOutput, AVAssetWriterInput)], control: PipelineControl, duration: Double, maxFps: Double?, continuation: CheckedContinuation<Void, Error>) {
+        self.reader = reader; self.writer = writer; self.pairs = pairs; self.control = control; self.duration = duration; self.maxFps = maxFps
         self.continuation = continuation; remaining = pairs.count
     }
-
-    var isCompleted: Bool { lock.lock(); defer { lock.unlock() }; return completed }
-
-    func start() {
-        // Keep the transfer alive only until its terminal callback. Writer inputs
-        // retain their readiness callbacks, so those callbacks must not own us.
+    func start() { queue.async { self.begin() } }
+    private func begin() {
         keepAlive = self
-        let deadline = DispatchTime.now().uptimeNanoseconds + 30 * 60 * 1_000_000_000
-        let timer = DispatchSource.makeTimerSource(queue: queue)
-        timer.schedule(deadline: .now() + 1, repeating: 1)
-        timer.setEventHandler { [weak self] in
-            guard let self, !self.isCompleted else { return }
-            if self.reader.status == .failed || self.writer.status == .failed {
-                self.finish(self.reader.error ?? self.writer.error ?? MediaJob.error("Media transfer failed."))
-            } else if self.reader.status == .cancelled || self.writer.status == .cancelled {
-                self.finish(MediaJob.error("Media transfer cancelled."))
-            } else if DispatchTime.now().uptimeNanoseconds >= deadline {
-                self.finish(MediaJob.error("Media export exceeded 30 minutes."))
+        hook = control.onCancel { [weak self] in
+            guard let self else { return }
+            self.reader.cancelReading()
+            self.queue.async {
+                do { try self.control.check(); self.terminate(CancellationError()) }
+                catch { self.terminate(error) }
             }
         }
-        watchdog = timer
-        timer.resume()
-        for pair in pairs {
-            let (output, input) = pair
+        for index in pairs.indices {
+            let input = pairs[index].1
             var ended = false
-            input.requestMediaDataWhenReady(on: queue) { [weak self] in
-                guard let self else { return }
-                guard !ended, !isCompleted else { return }
-                while input.isReadyForMoreMediaData && !isCompleted {
-                    let sample = autoreleasepool { output.copyNextSampleBuffer() }
-                    guard let sample else {
-                        ended = true
-                        input.markAsFinished()
-                        finish(reader.status == .failed ? reader.error : nil)
-                        return
+            input.requestMediaDataWhenReady(on: queue) { [weak self, weak input] in
+                guard let self, let input, !ended, !self.completed else { return }
+                do {
+                    while input.isReadyForMoreMediaData && !self.completed {
+                        try self.control.check()
+                        guard let sample = autoreleasepool(invoking: { self.pairs[index].0.copyNextSampleBuffer() }) else {
+                            ended = true; input.markAsFinished()
+                            if self.reader.status == .failed { throw self.reader.error ?? MediaJob.error("Cannot read media sample.") }
+                            self.remaining -= 1
+                            if self.remaining == 0 {
+                                self.writer.finishWriting { [self] in self.queue.async {
+                                    self.terminate(self.writer.status == .completed ? nil : self.writer.error ?? MediaJob.error("Cannot finalize media file."))
+                                } }
+                            }
+                            return
+                        }
+                        if input.mediaType == .video, let maxFps = self.maxFps {
+                            let time = CMSampleBufferGetPresentationTimeStamp(sample).seconds
+                            if self.firstVideoTime == nil { self.firstVideoTime = time }
+                            let position = (time - self.firstVideoTime!) * maxFps
+                            if position + 0.000001 < self.nextVideoIndex { continue }
+                            self.nextVideoIndex = floor(position + 0.000001) + 1
+                        }
+                        guard input.append(sample) else { throw self.writer.error ?? MediaJob.error("Cannot append media sample.") }
+                        if input.mediaType == .video {
+                            self.control.countFrame()
+                            let time = CMSampleBufferGetPresentationTimeStamp(sample).seconds
+                            self.control.emit(.processing, fraction: self.duration > 0 ? time / self.duration : nil)
+                        }
                     }
-                    if !input.append(sample) {
-                        ended = true
-                        finish(writer.error ?? MediaJob.error("Cannot append media sample."))
-                        return
-                    }
-                }
+                } catch { ended = true; self.terminate(error) }
             }
         }
     }
-
-    func finish(_ error: Error?) {
-        lock.lock()
-        guard !completed else { lock.unlock(); return }
-        remaining -= 1
-        guard error != nil || remaining == 0 else { lock.unlock(); return }
+    private func terminate(_ error: Error?) {
+        guard !completed else { return }
         completed = true
-        lock.unlock()
-        watchdog?.cancel()
-        watchdog = nil
+        if let hook { control.removeHook(hook) }
         keepAlive = nil
-        if let error {
-            reader.cancelReading()
-            writer.cancelWriting()
-            continuation.resume(throwing: error)
-        } else {
-            writer.finishWriting { [self] in
-                if writer.status == .completed { continuation.resume() }
-                else { continuation.resume(throwing: writer.error ?? MediaJob.error("Media writer failed.")) }
-            }
+        if let error { reader.cancelReading(); writer.cancelWriting(); continuation.resume(throwing: error) }
+        else {
+            do { try control.check(); continuation.resume() }
+            catch { continuation.resume(throwing: error) }
         }
     }
 }
-
-func transferSamples(reader: AVAssetReader, writer: AVAssetWriter, pairs: [(AVAssetReaderOutput, AVAssetWriterInput)]) async throws {
+func transferSamples(reader: AVAssetReader, writer: AVAssetWriter, pairs: [(AVAssetReaderOutput, AVAssetWriterInput)], duration: Double = 0, maxFps: Double? = nil) async throws {
+    guard let control = MediaJob.current?.control else { throw MediaJob.error("Missing media job context.") }
     try await withCheckedThrowingContinuation { continuation in
-        SampleTransfer(reader: reader, writer: writer, pairs: pairs, continuation: continuation).start()
+        SampleTransfer(reader: reader, writer: writer, pairs: pairs, control: control, duration: duration, maxFps: maxFps, continuation: continuation).start()
+    }
+}
+
+/// Serial ownership keeps the reusable image buffer alive through writer finalization.
+private final class ImageFrameTransfer: @unchecked Sendable {
+    let adaptor: AVAssetWriterInputPixelBufferAdaptor
+    let input: AVAssetWriterInput
+    let writer: AVAssetWriter
+    let buffer: CVPixelBuffer
+    let frameDuration: CMTime
+    let totalFrames: Int
+    let control: PipelineControl
+    let continuation: CheckedContinuation<Void, Error>
+    private let queue = DispatchQueue(label: "NitroMediaKit.imageFrames")
+    private var count = 0
+    private var completed = false
+    private var finalizing = false
+    private var hook: UUID?
+    private var keepAlive: ImageFrameTransfer?
+    init(adaptor: AVAssetWriterInputPixelBufferAdaptor, input: AVAssetWriterInput, writer: AVAssetWriter, buffer: CVPixelBuffer,
+        frameDuration: CMTime, totalFrames: Int, control: PipelineControl, continuation: CheckedContinuation<Void, Error>) {
+        self.adaptor = adaptor; self.input = input; self.writer = writer; self.buffer = buffer
+        self.frameDuration = frameDuration; self.totalFrames = totalFrames; self.control = control; self.continuation = continuation
+    }
+    func start() { queue.async { self.begin() } }
+    private func begin() {
+        keepAlive = self
+        hook = control.onCancel { [weak self] in
+            guard let self else { return }
+            self.queue.async {
+                do { try self.control.check(); self.finish(CancellationError()) } catch { self.finish(error) }
+            }
+        }
+        input.requestMediaDataWhenReady(on: queue) { [weak self] in
+            guard let self, !self.completed, !self.finalizing else { return }
+            do {
+                while self.input.isReadyForMoreMediaData && self.count < self.totalFrames {
+                    try self.control.check()
+                    let time = CMTimeMultiply(self.frameDuration, multiplier: Int32(self.count))
+                    guard self.adaptor.append(self.buffer, withPresentationTime: time) else { throw self.writer.error ?? MediaJob.error("Cannot append image video frame.") }
+                    self.count += 1; self.control.countFrame()
+                    self.control.emit(.processing, fraction: Double(self.count) / Double(self.totalFrames))
+                }
+                if self.count == self.totalFrames {
+                    self.finalizing = true
+                    self.input.markAsFinished()
+                    self.writer.endSession(atSourceTime: CMTimeMultiply(self.frameDuration, multiplier: Int32(self.totalFrames)))
+                    self.writer.finishWriting { [self] in self.queue.async {
+                        do {
+                            try self.control.check()
+                            self.finish(self.writer.status == .completed ? nil : self.writer.error ?? MediaJob.error("Cannot finalize image video."))
+                        } catch { self.finish(error) }
+                    } }
+                }
+            } catch { self.finish(error) }
+        }
+    }
+    private func finish(_ error: Error?) {
+        guard !completed else { return }
+        completed = true
+        if let hook { control.removeHook(hook) }
+        if let error { writer.cancelWriting(); continuation.resume(throwing: error) }
+        else { continuation.resume() }
+        keepAlive = nil
+    }
+}
+
+func transferImageFrames(adaptor: AVAssetWriterInputPixelBufferAdaptor, input: AVAssetWriterInput, writer: AVAssetWriter,
+    buffer: CVPixelBuffer, frameDuration: CMTime, totalFrames: Int, control: PipelineControl) async throws {
+    try await withCheckedThrowingContinuation { continuation in
+        ImageFrameTransfer(adaptor: adaptor, input: input, writer: writer, buffer: buffer,
+            frameDuration: frameDuration, totalFrames: totalFrames, control: control, continuation: continuation).start()
     }
 }

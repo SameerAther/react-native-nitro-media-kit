@@ -3,6 +3,20 @@ package com.margelo.nitro.nitromediakit
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.ImageDecoder
+import android.os.Build
+import android.os.Handler
+import android.os.SystemClock
+import androidx.media3.common.Effect
+import androidx.media3.transformer.ProgressHolder
+import androidx.media3.common.audio.ChannelMixingAudioProcessor
+import androidx.media3.common.audio.ChannelMixingMatrix
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.job
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import android.graphics.Canvas
 import android.graphics.Matrix
 import android.graphics.Paint
@@ -19,8 +33,9 @@ import androidx.exifinterface.media.ExifInterface
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MimeTypes
 import androidx.media3.datasource.DataSourceBitmapLoader
+import androidx.media3.inspector.frame.FrameExtractor
+import androidx.media3.exoplayer.SeekParameters
 import androidx.media3.effect.BitmapOverlay
-import androidx.media3.effect.FrameDropEffect
 import androidx.media3.effect.OverlayEffect
 import androidx.media3.effect.Presentation
 import androidx.media3.effect.TextureOverlay
@@ -62,23 +77,45 @@ class NitroMediaKit constructor(private val applicationContext: Context) : Hybri
     constructor() : this(requireNotNull(NitroModules.applicationContext))
 
     private fun execute(
-        operation: OperationType,
-        input: String?,
-        type: MediaType = MediaType.VIDEO,
+        operation: OperationType, input: String?, type: MediaType = MediaType.VIDEO,
+        control: PipelineControl = PipelineControl(),
         block: suspend (MediaJob) -> MediaInfoResult
     ): Promise<MediaInfoResult> = Promise.async(ioScope) {
-        workMutex.withLock {
-            val job = MediaJob(applicationContext)
-            var success = false
-            try {
-                block(job).also { success = it.ok }
-            } catch (error: Exception) {
-                makeErrorResult(operation, type, input, error = error)
-            } finally {
-                job.finish(success)
-            }
+        var job: MediaJob? = null
+        var success = false
+        val owner = currentCoroutineContext().job
+        val cancellation = control.onCancel { owner.cancel(CancellationException("Media job interrupted.")) }
+        try {
+            PipelineControl.register(control)
+            control.check()
+            job = MediaJob(applicationContext, control)
+            val result = block(job)
+            control.emit(ExportStage.VALIDATING)
+            val committed = job.commit(result)
+            success = committed.ok
+            if (success) control.emit(ExportStage.COMPLETED, 1.0)
+            committed
+        } catch (error: Exception) {
+            val reason = runCatching { control.check() }.exceptionOrNull() as? Exception ?: error
+            makeErrorResult(operation, type, input, error = reason)
+        } finally {
+            cancellation.close()
+            job?.finish(success) ?: control.close()
+            PipelineControl.jobs.remove(control.id, control)
         }
     }
+
+    override fun exportVideo(video: String, options: ExportVideoOptions, jobId: String, onProgress: ((ExportProgress) -> Unit)?): Promise<MediaInfoResult> {
+        require(jobId.isNotBlank() && jobId.length <= 128) { "Invalid job ID." }
+        val control = PipelineControl(jobId, options.limits, onProgress)
+        try { PipelineControl.register(control) } catch (e: Exception) { control.close(); throw e }
+        control.emit(ExportStage.QUEUED)
+        return execute(OperationType.EXPORTVIDEO, video, control = control) { job ->
+            exportResolved(job, job.resolve(video), video, options, OperationType.EXPORTVIDEO)
+        }
+    }
+
+    override fun cancelJob(jobId: String): Promise<Boolean> = Promise.async(ioScope) { PipelineControl.jobs[jobId]?.cancel() ?: false }
 
     override fun getMediaInfo(inputUri: String): Promise<MediaInfoResult> =
         execute(OperationType.GETMEDIAINFO, inputUri) { job ->
@@ -89,16 +126,17 @@ class NitroMediaKit constructor(private val applicationContext: Context) : Hybri
 
     private fun inspect(file: File): Pair<MediaType, MediaInfoMedia> {
         val image = detectImageInfo(file.path)
-        if (image != null) return MediaType.IMAGE to MediaInfoMedia(
+        if (image != null) return MediaType.IMAGE to requireNotNull(buildMediaInfo(
             durationMs = null, width = image.displayWidth.toDouble(), height = image.displayHeight.toDouble(),
             fps = null, format = image.extension, sizeBytes = file.length().toDouble(), audioTracks = 0.0, videoTracks = 0.0
-        )
+        ))
         val info = detectVideoInfo(file.path)
-        return MediaType.VIDEO to MediaInfoMedia(
+        return MediaType.VIDEO to requireNotNull(buildMediaInfo(
             durationMs = info.durationMs, width = info.displayWidth.toDouble(), height = info.displayHeight.toDouble(),
-            fps = info.fps, format = file.extension, sizeBytes = file.length().toDouble(),
-            audioTracks = info.audioTracks.toDouble(), videoTracks = 1.0
-        )
+            fps = info.fps.takeIf { it > 0 }, format = file.extension, sizeBytes = file.length().toDouble(),
+            audioTracks = info.audioTracks.toDouble(), videoTracks = 1.0, codec = info.mime, hdr = info.hdr, bitDepth = info.bitDepth.toDouble().takeIf { it > 0 },
+            bitrateKbps = info.bitrateKbps, audioChannels = info.audioChannels.toDouble(), audioSampleRate = info.audioSampleRate.toDouble()
+        ))
     }
 
     private fun outputResult(operation: OperationType, input: String?, file: File, warnings: Array<MediaInfoWarning>? = null): MediaInfoResult {
@@ -112,23 +150,10 @@ class NitroMediaKit constructor(private val applicationContext: Context) : Hybri
             val resolved = resolveCompressOptions(options)
             val image = detectImageInfo(file.path)
             if (image != null) {
-                compressImage(inputUri, file.path, image, resolved, job)
+                imagePermits.withPermit { compressImage(inputUri, file.path, image, resolved, job) }
             } else {
-                val info = detectVideoInfo(file.path)
-                val plan = resolveVideoCompressionPlan(info, resolved)
-                val (width, height) = computeScaledDimensions(info.displayWidth, info.displayHeight, plan.maxLongEdge)
-                val effects = listOf(
-                    Presentation.createForWidthAndHeight(width.coerceAtLeast(2) / 2 * 2, height.coerceAtLeast(2) / 2 * 2, Presentation.LAYOUT_SCALE_TO_FIT),
-                    FrameDropEffect.createDefaultFrameDropEffect(minOf(plan.maxFps.toDouble(), info.fps).toFloat())
-                )
-                val item = EditedMediaItem.Builder(MediaItem.fromUri(Uri.fromFile(file)))
-                    .setRemoveAudio(!plan.keepAudio).setEffects(Effects(emptyList(), effects)).build()
-                val output = job.output("mp4")
-                transform(listOf(item), output, plan.videoBitrateKbps, plan.audioBitrateKbps, includeAudio = plan.keepAudio && info.audioTracks > 0, preserveMetadata = resolved.preserveMetadata)
-                val warnings = mutableListOf<MediaInfoWarning>()
-                if (resolved.preserveMetadata) warnings.add(warning("METADATA_PRESERVE_PARTIAL", "Only metadata supported by the device MP4 muxer is retained."))
-                if (output.length() >= file.length()) warnings.add(warning("LIMITED_SAVINGS", "Output is not smaller than the source; reduce size or bitrate for more savings."))
-                outputResult(OperationType.COMPRESSMEDIA, inputUri, output, warnings.takeIf { it.isNotEmpty() }?.toTypedArray())
+                exportResolved(job, file, inputUri, ExportVideoOptions(null, null, null,
+                    options?.preset ?: CompressionPreset.AUTO, options?.video, null, options?.preserveMetadata, null), OperationType.COMPRESSMEDIA)
             }
         }
 
@@ -138,12 +163,12 @@ class NitroMediaKit constructor(private val applicationContext: Context) : Hybri
             val input = job.resolve(image)
             val info = detectImageInfo(input.path) ?: throw UnsupportedMediaException("Input must be an image.")
             val (width, height) = computeScaledDimensions(info.displayWidth, info.displayHeight, 1920)
-            val item = EditedMediaItem.Builder(MediaItem.Builder().setUri(Uri.fromFile(input)).setImageDurationMs((duration * 1000).roundToInt().toLong().coerceAtLeast(1)).build())
+            val item = EditedMediaItem.Builder(MediaItem.Builder().setUri(Uri.fromFile(input)).setMimeType("image/${info.extension ?: "jpeg"}").setImageDurationMs(kotlin.math.ceil(kotlin.math.ceil(duration * 30) * 1000 / 30).toLong()).build())
                 .setFrameRate(30)
                 .setEffects(Effects(emptyList(), listOf(Presentation.createForWidthAndHeight(width.coerceAtLeast(2) / 2 * 2, height.coerceAtLeast(2) / 2 * 2, Presentation.LAYOUT_SCALE_TO_FIT))))
                 .build()
             val output = job.output("mp4")
-            transform(listOf(item), output)
+            transform(listOf(item), output, control = job.control)
             outputResult(OperationType.CONVERTIMAGETOVIDEO, image, output)
         }
 
@@ -153,15 +178,28 @@ class NitroMediaKit constructor(private val applicationContext: Context) : Hybri
             val files = videos.map { job.resolve(it) }
             val infos = files.map { detectVideoInfo(it.path) }
             val first = infos.first()
-            val (width, height) = computeScaledDimensions(first.displayWidth, first.displayHeight, 1920)
+            require(infos.none { it.bitDepth > 8 && !it.hdr }) { "Merging high-bit-depth SDR cannot guarantee precision on this pipeline; convert inputs with an explicit SDR policy first." }
+            val audioSource = infos.firstOrNull { it.audioTracks > 0 }
+            require(infos.filter { it.audioTracks > 0 }.all { it.audioChannels == audioSource?.audioChannels }) { "Merge audio layouts differ; normalize inputs with an explicit stereo policy first." }
+            val (width, height) = computeScaledDimensions(first.displayWidth, first.displayHeight, maxOf(first.displayWidth, first.displayHeight))
             val presentation = Presentation.createForWidthAndHeight(width.coerceAtLeast(2) / 2 * 2, height.coerceAtLeast(2) / 2 * 2, Presentation.LAYOUT_SCALE_TO_FIT)
             val items = files.map { file ->
                 EditedMediaItem.Builder(MediaItem.fromUri(Uri.fromFile(file)))
                     .setEffects(Effects(emptyList(), listOf(presentation))).build()
             }
             val output = job.output("mp4")
-            transform(items, output, includeAudio = infos.any { it.audioTracks > 0 })
-            outputResult(OperationType.MERGEVIDEOS, videos.first(), output)
+            val hdr = infos.any { it.hdr }
+            val mergedSource = VideoSource(first.displayWidth, first.displayHeight, infos.maxOf { it.fps }, infos.sumOf { it.durationMs },
+                if (hdr) "video/hevc" else first.mime, hdr, infos.mapNotNull { it.bitrateKbps }.maxOrNull(),
+                infos.maxOf { it.audioTracks }, infos.maxOf { it.audioChannels }, first.audioSampleRate)
+            val plan = ExportPlanner.plan(mergedSource, ExportVideoOptions(null, null, null, CompressionPreset.PRESERVE, null, null, false, null), forceEncode = true)
+            val exported = transform(items, output, videoKbps = plan.bitrateKbps, includeAudio = audioSource != null, control = job.control, plan = plan)
+            outputResult(OperationType.MERGEVIDEOS, videos.first(), output).also {
+                require(!hdr || it.media?.hdr == true) { "Encoder could not preserve merged HDR output." }
+                require(audioSource == null || it.media?.audioChannels == audioSource.audioChannels.toDouble()) { "Encoder changed the merged audio channel layout." }
+            }.copy(diagnostics = ExportDiagnostics((SystemClock.elapsedRealtime() - job.control.started).toDouble(), output.length().toDouble(), job.control.peakMemoryBytes,
+                VideoProcessingPath.ENCODED, if (audioSource == null) AudioProcessingPath.ABSENT else if (exported.audioConversionProcess == ExportResult.CONVERSION_PROCESS_TRANSMUXED) AudioProcessingPath.COPIED else AudioProcessingPath.ENCODED,
+                exported.videoMimeType, plan.estimatedSizeBytes, exported.videoFrameCount.toDouble().takeIf { it > 0 }))
         }
 
     override fun splitVideo(video: String, segments: Array<VideoSegment>): Promise<MediaInfoResult> =
@@ -171,7 +209,7 @@ class NitroMediaKit constructor(private val applicationContext: Context) : Hybri
             val info = detectVideoInfo(file.path)
             segments.forEach { validateSegment(it, info.durationMs) }
             val outputs = segments.map { segment ->
-                job.output("mp4").also { transform(listOf(clipped(file, segment)), it, includeAudio = info.audioTracks > 0) }.path
+                requireNotNull(exportResolved(job, file, video, ExportVideoOptions(segment, null, null, CompressionPreset.PRESERVE, null, null, false, null), OperationType.TRIMVIDEO, info).outputUri)
             }
             makeResult(true, OperationType.SPLITVIDEO, MediaType.VIDEO, video, segments = outputs.toTypedArray())
         }
@@ -179,11 +217,7 @@ class NitroMediaKit constructor(private val applicationContext: Context) : Hybri
     override fun trimVideo(video: String, segment: VideoSegment): Promise<MediaInfoResult> =
         execute(OperationType.TRIMVIDEO, video) { job ->
             val file = job.resolve(video)
-            val info = detectVideoInfo(file.path)
-            validateSegment(segment, info.durationMs)
-            val output = job.output("mp4")
-            transform(listOf(clipped(file, segment)), output, includeAudio = info.audioTracks > 0)
-            outputResult(OperationType.TRIMVIDEO, video, output)
+            exportResolved(job, file, video, ExportVideoOptions(segment, null, null, CompressionPreset.PRESERVE, null, null, false, null), OperationType.TRIMVIDEO)
         }
 
     private fun validateSegment(segment: VideoSegment, durationMs: Double) {
@@ -192,20 +226,9 @@ class NitroMediaKit constructor(private val applicationContext: Context) : Hybri
         }
     }
 
-    private fun clipped(file: File, segment: VideoSegment): EditedMediaItem = EditedMediaItem.Builder(
-        MediaItem.Builder().setUri(Uri.fromFile(file)).setClippingConfiguration(
-            MediaItem.ClippingConfiguration.Builder().setStartPositionUs((segment.startMs * 1000).toLong())
-                .setEndPositionUs((segment.endMs * 1000).toLong()).build()
-        ).build()
-    ).build()
-
     override fun removeAudio(video: String): Promise<MediaInfoResult> =
         execute(OperationType.REMOVEAUDIO, video) { job ->
-            val file = job.resolve(video)
-            detectVideoInfo(file.path)
-            val output = job.output("mp4")
-            transform(listOf(EditedMediaItem.Builder(MediaItem.fromUri(Uri.fromFile(file))).setRemoveAudio(true).build()), output)
-            outputResult(OperationType.REMOVEAUDIO, video, output)
+            exportResolved(job, job.resolve(video), video, ExportVideoOptions(null, null, null, CompressionPreset.PRESERVE, null, AudioPolicy.MUTE, false, null), OperationType.REMOVEAUDIO)
         }
 
     override fun extractThumbnail(video: String, options: ThumbnailOptions?): Promise<MediaInfoResult> =
@@ -219,66 +242,42 @@ class NitroMediaKit constructor(private val applicationContext: Context) : Hybri
             val file = job.resolve(video)
             val info = detectVideoInfo(file.path)
             require(timeMs < info.durationMs) { "timeMs must be less than the video duration." }
-            val (width, height) = computeScaledDimensions(info.displayWidth, info.displayHeight, edge.toInt())
-            val retriever = MediaMetadataRetriever()
-            var bitmap: Bitmap? = null
-            try {
-                retriever.setDataSource(file.path)
-                bitmap = if (android.os.Build.VERSION.SDK_INT >= 27) {
-                    retriever.getScaledFrameAtTime((timeMs * 1000).toLong(), MediaMetadataRetriever.OPTION_CLOSEST, width, height)
-                } else retriever.getFrameAtTime((timeMs * 1000).toLong(), MediaMetadataRetriever.OPTION_CLOSEST)
-                val frame = bitmap ?: throw IOException("Cannot decode the requested frame.")
-                val scaled = if (frame.width > width || frame.height > height) Bitmap.createScaledBitmap(frame, width, height, true) else frame
+            val boundedEdge = ExportPlanner.imageEdge(info.displayWidth, info.displayHeight, edge.toInt(), options?.maxLongEdge != null, Runtime.getRuntime().maxMemory())
+            val (width, height) = computeScaledDimensions(info.displayWidth, info.displayHeight, boundedEdge)
+            imagePermits.withPermit {
+                val extractor = FrameExtractor.Builder(applicationContext, MediaItem.fromUri(Uri.fromFile(file)))
+                    .setSeekParameters(if ((options?.precision ?: ThumbnailPrecision.PRECISE) == ThumbnailPrecision.PRECISE) SeekParameters.EXACT else SeekParameters.CLOSEST_SYNC)
+                    .setEffects(listOf(Presentation.createForWidthAndHeight(width, height, Presentation.LAYOUT_SCALE_TO_FIT))).build()
                 try {
-                    val output = job.output("jpg")
-                    output.outputStream().use { check(scaled.compress(Bitmap.CompressFormat.JPEG, (quality * 100).roundToInt(), it)) { "Cannot encode thumbnail." } }
-                    outputResult(OperationType.EXTRACTTHUMBNAIL, video, output)
-                } finally { if (scaled !== frame) scaled.recycle() }
-            } finally {
-                bitmap?.recycle()
-                retriever.release()
+                    val future = extractor.getFrame(timeMs.toLong())
+                    val hook = job.control.onCancel { future.cancel(true) }
+                    val frame = try {
+                        suspendCancellableCoroutine<FrameExtractor.Frame> { continuation ->
+                            future.addListener({
+                                runCatching { future.get() }.onSuccess { if (continuation.isActive) continuation.resume(it) }
+                                    .onFailure { if (continuation.isActive) continuation.resumeWithException(it) }
+                            }, MoreExecutors.directExecutor())
+                            continuation.invokeOnCancellation { future.cancel(true) }
+                        }
+                    } finally { hook.close() }
+                    try {
+                        job.control.check()
+                        val output = job.output("jpg")
+                        output.outputStream().use { check(frame.bitmap.compress(Bitmap.CompressFormat.JPEG, (quality * 100).roundToInt(), it)) }
+                        outputResult(OperationType.EXTRACTTHUMBNAIL, video, output).copy(actualTimeMs = frame.presentationTimeMs.toDouble())
+                    } finally { frame.bitmap.recycle() }
+                } finally { extractor.close() }
             }
         }
 
     override fun deleteGeneratedFile(uri: String): Promise<Boolean> = Promise.async(ioScope) {
-        workMutex.withLock { MediaJob.deleteOutput(applicationContext, uri) }
+        MediaJob.deleteOutput(applicationContext, uri)
     }
 
     override fun watermarkVideo(video: String, watermark: String, options: WatermarkOptions?): Promise<MediaInfoResult> =
         execute(OperationType.WATERMARKVIDEO, video) { job ->
-            require(watermark.isNotBlank() && watermark.length <= 4096) { "Watermark must contain 1 to 4096 characters." }
-            val input = job.resolve(video)
-            val info = detectVideoInfo(input.path)
-            val fontSize = options?.fontSize ?: minOf(info.displayWidth, info.displayHeight) * 0.05
-            val margin = options?.margin ?: minOf(info.displayWidth, info.displayHeight) * 0.025
-            val opacity = options?.opacity ?: 1.0
-            require(fontSize.isFinite() && fontSize >= 1 && fontSize <= 512) { "fontSize must be in [1, 512]." }
-            require(margin.isFinite() && margin >= 0 && margin * 2 < minOf(info.displayWidth, info.displayHeight)) { "margin leaves no room for the watermark." }
-            require(opacity.isFinite() && opacity in 0.0..1.0) { "opacity must be in [0, 1]." }
-            val color = parseColor(options?.color ?: "#FFFFFFFF")
-            val bitmap = textBitmap(watermark, fontSize.toFloat(), color, info.displayWidth - 2 * margin.toInt(), info.displayHeight - 2 * margin.toInt())
-            try {
-                val position = options?.position ?: WatermarkPosition.BOTTOM_RIGHT
-                val x = when (position) {
-                    WatermarkPosition.TOP_LEFT, WatermarkPosition.BOTTOM_LEFT -> margin
-                    WatermarkPosition.TOP_RIGHT, WatermarkPosition.BOTTOM_RIGHT -> info.displayWidth - margin - bitmap.width
-                    WatermarkPosition.CENTER -> (info.displayWidth - bitmap.width) / 2.0
-                }
-                val y = when (position) {
-                    WatermarkPosition.TOP_LEFT, WatermarkPosition.TOP_RIGHT -> margin
-                    WatermarkPosition.BOTTOM_LEFT, WatermarkPosition.BOTTOM_RIGHT -> info.displayHeight - margin - bitmap.height
-                    WatermarkPosition.CENTER -> (info.displayHeight - bitmap.height) / 2.0
-                }
-                val settings = StaticOverlaySettings.Builder().setAlphaScale(opacity.toFloat())
-                    .setOverlayFrameAnchor(-1f, 1f)
-                    .setBackgroundFrameAnchor((2 * x / info.displayWidth - 1).toFloat(), (1 - 2 * y / info.displayHeight).toFloat()).build()
-                val overlay = BitmapOverlay.createStaticBitmapOverlay(bitmap, settings)
-                val effects = Effects(emptyList(), listOf(OverlayEffect(listOf<TextureOverlay>(overlay))))
-                val item = EditedMediaItem.Builder(MediaItem.fromUri(Uri.fromFile(input))).setEffects(effects).build()
-                val output = job.output("mp4")
-                transform(listOf(item), output, includeAudio = info.audioTracks > 0)
-                outputResult(OperationType.WATERMARKVIDEO, video, output)
-            } finally { bitmap.recycle() }
+            exportResolved(job, job.resolve(video), video,
+                ExportVideoOptions(null, watermark, options, CompressionPreset.PRESERVE, null, null, false, null), OperationType.WATERMARKVIDEO)
         }
 
     private fun parseColor(value: String): Int {
@@ -297,61 +296,146 @@ class NitroMediaKit constructor(private val applicationContext: Context) : Hybri
             paint.textSize = (paint.textSize * 0.85f).coerceAtLeast(1f)
         } while (true)
         require(layout.height <= height) { "Watermark cannot fit inside the video." }
-        val bitmap = Bitmap.createBitmap((0 until layout.lineCount).maxOf { layout.getLineWidth(it) }.toInt().coerceIn(1, width), layout.height.coerceAtLeast(1), Bitmap.Config.ARGB_8888)
+        val bitmapWidth = kotlin.math.ceil((0 until layout.lineCount).maxOf { layout.getLineWidth(it) }.toDouble()).toInt().coerceIn(1, width)
+        require(bitmapWidth.toLong() * layout.height <= minOf(16_777_216L, Runtime.getRuntime().maxMemory() / 32)) { "Watermark exceeds the image memory budget." }
+        val bitmap = Bitmap.createBitmap(bitmapWidth, layout.height.coerceAtLeast(1), Bitmap.Config.ARGB_8888)
         layout.draw(Canvas(bitmap))
         return bitmap
     }
 
     /** Media3 owns codec backpressure, frame transforms, timestamps, audio and muxing. */
-    private suspend fun transform(items: List<EditedMediaItem>, output: File, videoKbps: Int? = null, audioKbps: Int? = null, includeAudio: Boolean = false, preserveMetadata: Boolean = false) {
-        withTimeout(30 * 60 * 1000L) {
-            withContext(Dispatchers.Main.immediate) {
-                var activeTransformer: Transformer? = null
-                try {
-                suspendCancellableCoroutine<Unit> { continuation ->
-                    val factory = DefaultEncoderFactory.Builder(applicationContext).setEnableFallback(true)
-                    if (videoKbps != null) factory.setRequestedVideoEncoderSettings(VideoEncoderSettings.Builder().setBitrate(videoKbps * 1000).build())
-                    if (audioKbps != null) factory.setRequestedAudioEncoderSettings(AudioEncoderSettings.Builder().setBitrate(audioKbps * 1000).build())
-                    val transformer = Transformer.Builder(applicationContext).setLooper(Looper.getMainLooper())
-                        .setVideoMimeType(MimeTypes.VIDEO_H264).setAudioMimeType(MimeTypes.AUDIO_AAC)
-                        .setEncoderFactory(factory.build())
-                        .setMuxerFactory(MetadataMuxerFactory(preserveMetadata))
-                        .setAssetLoaderFactory(DefaultAssetLoaderFactory(applicationContext,
-                            DataSourceBitmapLoader.Builder(applicationContext).setExecutorService(bitmapExecutor)
-                                .setMaximumOutputDimension(1920).build()))
-                        .addListener(object : Transformer.Listener {
-                            override fun onCompleted(composition: Composition, exportResult: ExportResult) {
-                                if (continuation.isActive) continuation.resume(Unit)
-                            }
-                            override fun onError(composition: Composition, exportResult: ExportResult, exportException: ExportException) {
-                                if (continuation.isActive) continuation.resumeWithException(exportException)
-                            }
-                        }).build()
-                    activeTransformer = transformer
-                    try {
-                        val sequence = if (includeAudio) EditedMediaItemSequence.withAudioAndVideoFrom(items)
-                        else EditedMediaItemSequence.withVideoFrom(items)
-                        val composition = Composition.Builder(sequence)
-                            .setHdrMode(Composition.HDR_MODE_TONE_MAP_HDR_TO_SDR_USING_OPEN_GL).build()
-                        transformer.start(composition, output.path)
-                    } catch (error: Exception) {
-                        transformer.cancel()
-                        if (continuation.isActive) continuation.resumeWithException(error)
-                    }
-                }
-                } finally {
-                    // Resume/cancellation returns to the application looper before recycling overlays or deleting files.
-                    activeTransformer?.cancel()
-                }
-            }
+    private suspend fun exportResolved(job: MediaJob, input: File, inputUri: String, options: ExportVideoOptions, operation: OperationType, sourceInfo: DetectedVideoInfo? = null): MediaInfoResult {
+        val info = sourceInfo ?: detectVideoInfo(input.path)
+        val source = VideoSource(info.displayWidth, info.displayHeight, info.fps, info.durationMs, info.mime, info.hdr, info.bitrateKbps, info.audioTracks, info.audioChannels, info.audioSampleRate, info.bitDepth)
+        val plan = ExportPlanner.plan(source, options)
+        require(!(source.bitDepth > 8 && !source.hdr && plan.color != ColorPolicy.SDR && !plan.canCopy)) { "This device pipeline cannot guarantee high-bit-depth SDR re-encoding; choose sdr conversion explicitly." }
+        val videoEffects = mutableListOf<Effect>()
+        if (plan.width != info.displayWidth || plan.height != info.displayHeight) videoEffects.add(Presentation.createForWidthAndHeight(plan.width, plan.height, Presentation.LAYOUT_SCALE_TO_FIT))
+        when (plan.timing) {
+            FrameRatePolicy.PRESERVE -> Unit
+            FrameRatePolicy.CAP -> videoEffects.add(CappedFrameRateEffect(plan.fps))
+            FrameRatePolicy.CONSTANT -> videoEffects.addAll(ConstantFrameRateEffect.create(plan.fps, (plan.durationMs * 1000).toLong()))
         }
-        check(output.isFile && output.length() > 0) { "Export produced no media." }
+        var bitmap: Bitmap? = null
+        try {
+            options.watermark?.let { text ->
+                require(text.isNotBlank() && text.length <= 4096) { "Watermark must contain 1 to 4096 characters." }
+                val opt = options.watermarkOptions
+                val font = opt?.fontSize ?: minOf(plan.width, plan.height) * 0.05
+                val margin = opt?.margin ?: minOf(plan.width, plan.height) * 0.025
+                val opacity = opt?.opacity ?: 1.0
+                ExportPlanner.finite(font, 1.0, 512.0, "fontSize"); ExportPlanner.finite(opacity, 0.0, 1.0, "opacity")
+                require(margin.isFinite() && margin >= 0 && margin * 2 < minOf(plan.width, plan.height)) { "Invalid watermark margin." }
+                val overlayBitmap = textBitmap(text, font.toFloat(), parseColor(opt?.color ?: "#FFFFFFFF"), (plan.width - 2 * margin).toInt(), (plan.height - 2 * margin).toInt())
+                bitmap = overlayBitmap
+                val position = opt?.position ?: WatermarkPosition.BOTTOM_RIGHT
+                val x = when(position) {
+                    WatermarkPosition.TOP_LEFT, WatermarkPosition.BOTTOM_LEFT -> margin
+                    WatermarkPosition.TOP_RIGHT, WatermarkPosition.BOTTOM_RIGHT -> plan.width - margin - overlayBitmap.width
+                    WatermarkPosition.CENTER -> (plan.width - overlayBitmap.width) / 2.0
+                }
+                val y = when(position) {
+                    WatermarkPosition.TOP_LEFT, WatermarkPosition.TOP_RIGHT -> margin
+                    WatermarkPosition.BOTTOM_LEFT, WatermarkPosition.BOTTOM_RIGHT -> plan.height - margin - overlayBitmap.height
+                    WatermarkPosition.CENTER -> (plan.height - overlayBitmap.height) / 2.0
+                }
+                val settings = StaticOverlaySettings.Builder().setAlphaScale(opacity.toFloat()).setOverlayFrameAnchor(-1f, 1f)
+                    .setBackgroundFrameAnchor((2 * x / plan.width - 1).toFloat(), (1 - 2 * y / plan.height).toFloat()).build()
+                videoEffects.add(OverlayEffect(listOf<TextureOverlay>(BitmapOverlay.createStaticBitmapOverlay(overlayBitmap, settings))))
+            }
+            val audioEffects = if (plan.audio == AudioPolicy.STEREO && info.audioTracks > 0) {
+                listOf(ChannelMixingAudioProcessor().apply { putChannelMixingMatrix(ChannelMixingMatrix.createForConstantPower(info.audioChannels, 2)) })
+            } else emptyList()
+            val media = MediaItem.Builder().setUri(Uri.fromFile(input))
+            options.trim?.let { media.setClippingConfiguration(MediaItem.ClippingConfiguration.Builder().setStartPositionUs((it.startMs * 1000).toLong()).setEndPositionUs((it.endMs * 1000).toLong()).build()) }
+            val item = EditedMediaItem.Builder(media.build()).setRemoveAudio(plan.audio == AudioPolicy.MUTE)
+                .setEffects(Effects(audioEffects, videoEffects)).build()
+            val output = job.output("mp4")
+            val exported = transform(listOf(item), output,
+                videoKbps = if (plan.canCopy) null else plan.bitrateKbps,
+                audioKbps = if (plan.audio == AudioPolicy.STEREO || options.video?.audioBitrateKbps != null) plan.audioBitrateKbps else null,
+                includeAudio = plan.audio != AudioPolicy.MUTE && info.audioTracks > 0, preserveMetadata = options.preserveMetadata ?: false,
+                control = job.control, plan = plan)
+            job.control.emit(ExportStage.VALIDATING)
+            val result = outputResult(operation, inputUri, output)
+            val warnings = mutableListOf<MediaInfoWarning>()
+            if (result.media?.width != plan.width.toDouble() || result.media.height != plan.height.toDouble()) warnings.add(warning("ENCODER_SIZE_FALLBACK", "Encoder changed the requested output dimensions."))
+            if (exported.videoMimeType != null && exported.videoMimeType != plan.mime) warnings.add(warning("ENCODER_CODEC_FALLBACK", "Encoder changed the requested output codec."))
+            require(!(info.hdr && plan.color == ColorPolicy.PRESERVE && result.media?.hdr != true)) { "Encoder did not preserve HDR; choose sdr conversion explicitly." }
+            if ((result.media?.audioTracks ?: 0.0) > 0) {
+                val expectedChannels = if (plan.audio == AudioPolicy.STEREO) 2 else info.audioChannels
+                require(expectedChannels == 0 || result.media?.audioChannels == expectedChannels.toDouble()) { "Encoder changed the requested audio channel layout." }
+            }
+            require(plan.color != ColorPolicy.SDR || result.media?.hdr != true) { "Export did not produce the requested SDR output." }
+            require(options.trim != null || plan.audio == AudioPolicy.MUTE || info.audioTracks == 0 || (result.media?.audioTracks ?: 0.0) > 0) { "Export unexpectedly lost the primary audio track." }
+            if (options.video?.targetSizeBytes != null && output.length() > options.video.targetSizeBytes) warnings.add(warning("TARGET_SIZE_EXCEEDED", "Target size is an estimate; actual encoded output is larger."))
+            if (operation == OperationType.COMPRESSMEDIA && output.length() >= input.length()) warnings.add(warning("LIMITED_SAVINGS", "Output is not smaller than the input."))
+            if (options.preserveMetadata == true) warnings.add(warning("METADATA_PRESERVE_PARTIAL", "Only supported container metadata is retained."))
+            return result.copy(warnings = warnings.takeIf { it.isNotEmpty() }?.toTypedArray(), diagnostics = ExportDiagnostics(
+                (SystemClock.elapsedRealtime() - job.control.started).toDouble(), output.length().toDouble(), job.control.peakMemoryBytes,
+                when(exported.videoConversionProcess) { ExportResult.CONVERSION_PROCESS_TRANSMUXED -> VideoProcessingPath.COPIED; ExportResult.CONVERSION_PROCESS_TRANSMUXED_AND_TRANSCODED -> VideoProcessingPath.MIXED; else -> VideoProcessingPath.ENCODED },
+                if (plan.audio == AudioPolicy.MUTE || info.audioTracks == 0) AudioProcessingPath.ABSENT else if (exported.audioConversionProcess == ExportResult.CONVERSION_PROCESS_TRANSMUXED) AudioProcessingPath.COPIED else AudioProcessingPath.ENCODED,
+                exported.videoMimeType, plan.estimatedSizeBytes, exported.videoFrameCount.toDouble().takeIf { it > 0 }))
+        } finally { bitmap?.recycle() }
     }
+
+    /** Control stays on Transformer's application looper; the encoder permit excludes I/O/probing. */
+    private suspend fun transform(items: List<EditedMediaItem>, output: File, videoKbps: Int? = null, audioKbps: Int? = null, includeAudio: Boolean = false, preserveMetadata: Boolean = false,
+        control: PipelineControl, plan: VideoPlan? = null): ExportResult = workMutex.withLock {
+        control.check()
+        withContext(Dispatchers.Main.immediate) {
+            var active: Transformer? = null
+            val handler = Handler(Looper.getMainLooper())
+            var progressTask: Runnable? = null
+            var cancellation: java.io.Closeable? = null
+            try {
+                suspendCancellableCoroutine { continuation ->
+                    val factory = DefaultEncoderFactory.Builder(applicationContext).setEnableFallback(true).setEnableCodecDbLite(true)
+                    videoKbps?.let { factory.setRequestedVideoEncoderSettings(VideoEncoderSettings.Builder().setBitrate(it * 1000).build()) }
+                    audioKbps?.let { factory.setRequestedAudioEncoderSettings(AudioEncoderSettings.Builder().setBitrate(it * 1000).build()) }
+                    val builder = Transformer.Builder(applicationContext).setLooper(Looper.getMainLooper()).setAudioMimeType(MimeTypes.AUDIO_AAC)
+                        .setEncoderFactory(factory.build()).setMuxerFactory(MetadataMuxerFactory(preserveMetadata))
+                        .setAssetLoaderFactory(DefaultAssetLoaderFactory(applicationContext, DataSourceBitmapLoader.Builder(applicationContext).setExecutorService(bitmapExecutor).setMaximumOutputDimension(1920).build()))
+                        .addListener(object : Transformer.Listener {
+                            override fun onCompleted(composition: Composition, exportResult: ExportResult) { if (continuation.isActive) continuation.resume(exportResult) }
+                            override fun onError(composition: Composition, exportResult: ExportResult, exportException: ExportException) { if (continuation.isActive) continuation.resumeWithException(exportException) }
+                        })
+                    plan?.let { builder.setVideoMimeType(it.mime) }
+                    val transformer = builder.build()
+                    active = transformer
+                    val poll = object : Runnable {
+                        override fun run() {
+                            if (!continuation.isActive) return
+                            val holder = ProgressHolder()
+                            val state = transformer.getProgress(holder)
+                            control.emit(ExportStage.PROCESSING, if (state == Transformer.PROGRESS_STATE_AVAILABLE) holder.progress / 100.0 else null)
+                            handler.postDelayed(this, 200)
+                        }
+                    }
+                    progressTask = poll
+                    cancellation = control.onCancel { handler.post { transformer.cancel(); if (continuation.isActive) continuation.resumeWithException(runCatching { control.check() }.exceptionOrNull() ?: PipelineFailure("CANCELLED", "Media job cancelled.")) } }
+                    try {
+                        control.check()
+                        val sequence = if (includeAudio) EditedMediaItemSequence.withAudioAndVideoFrom(items) else EditedMediaItemSequence.withVideoFrom(items)
+                        val composition = Composition.Builder(sequence).setHdrMode(if (plan?.color == ColorPolicy.SDR) Composition.HDR_MODE_TONE_MAP_HDR_TO_SDR_USING_OPEN_GL else Composition.HDR_MODE_KEEP_HDR).build()
+                        transformer.start(composition, output.path)
+                        handler.post(poll)
+                    } catch (e: Exception) { transformer.cancel(); if (continuation.isActive) continuation.resumeWithException(e) }
+                }
+            } finally {
+                cancellation?.close()
+                progressTask?.let { handler.removeCallbacks(it) }
+                withContext(NonCancellable + Dispatchers.Main.immediate) { active?.cancel() }
+            }
+        }.also { control.check(); check(output.isFile && output.length() > 0) { "Export produced no media." } }
+    }
+
 
     companion object {
         private val ioScope = CoroutineScope(Dispatchers.IO)
         // Serial across HybridObject instances: device hardware encoders are scarce.
         private val workMutex = Mutex()
+        private val imagePermits = Semaphore(1)
         private val bitmapExecutor = MoreExecutors.listeningDecorator(Executors.newSingleThreadExecutor { task ->
             Thread(task, "NitroMediaKit.bitmap").apply { isDaemon = true }
         })
@@ -365,7 +449,9 @@ class NitroMediaKit constructor(private val applicationContext: Context) : Hybri
         format: String? = null,
         sizeBytes: Double? = null,
         audioTracks: Double? = null,
-        videoTracks: Double? = null
+        videoTracks: Double? = null,
+        codec: String? = null, hdr: Boolean? = null, bitDepth: Double? = null,
+        bitrateKbps: Double? = null, audioChannels: Double? = null, audioSampleRate: Double? = null
     ): MediaInfoMedia? {
         if (
             durationMs == null &&
@@ -379,7 +465,7 @@ class NitroMediaKit constructor(private val applicationContext: Context) : Hybri
         ) {
             return null
         }
-        return MediaInfoMedia(
+        return buildMediaInfo(
             durationMs = durationMs,
             width = width,
             height = height,
@@ -387,7 +473,8 @@ class NitroMediaKit constructor(private val applicationContext: Context) : Hybri
             format = format,
             sizeBytes = sizeBytes,
             audioTracks = audioTracks,
-            videoTracks = videoTracks
+            videoTracks = videoTracks, codec = codec, hdr = hdr, bitDepth = bitDepth,
+            bitrateKbps = bitrateKbps, audioChannels = audioChannels, audioSampleRate = audioSampleRate
         )
     }
 
@@ -400,7 +487,7 @@ class NitroMediaKit constructor(private val applicationContext: Context) : Hybri
         segments: Array<String>? = null,
         media: MediaInfoMedia? = null,
         warnings: Array<MediaInfoWarning>? = null,
-        error: MediaInfoError? = null
+        error: MediaInfoError? = null, actualTimeMs: Double? = null, diagnostics: ExportDiagnostics? = null
     ): MediaInfoResult {
         return MediaInfoResult(
             ok = ok,
@@ -411,7 +498,7 @@ class NitroMediaKit constructor(private val applicationContext: Context) : Hybri
             segments = segments,
             media = media,
             warnings = warnings,
-            error = error
+            error = error, actualTimeMs = actualTimeMs, diagnostics = diagnostics
         )
     }
 
@@ -423,7 +510,7 @@ class NitroMediaKit constructor(private val applicationContext: Context) : Hybri
         error: Exception
     ): MediaInfoResult {
         val errorInfo = MediaInfoError(
-            code = error.javaClass.simpleName ?: "Error",
+            code = (error as? PipelineFailure)?.code ?: error.javaClass.simpleName,
             message = error.message ?: "Unknown error"
         )
         return makeResult(
@@ -461,7 +548,8 @@ class NitroMediaKit constructor(private val applicationContext: Context) : Hybri
         val fps: Double,
         val sizeBytes: Long,
         val audioTracks: Int,
-        val extension: String?
+        val extension: String?, val mime: String, val hdr: Boolean, val bitDepth: Int,
+        val bitrateKbps: Double?, val audioChannels: Int, val audioSampleRate: Int
     )
 
     private data class ResolvedCompressOptions(
@@ -475,14 +563,6 @@ class NitroMediaKit constructor(private val applicationContext: Context) : Hybri
         val format: CompressImageFormat,
         val quality: Double?,
         val maxLongEdge: Int
-    )
-
-    private data class VideoCompressionPlan(
-        val maxLongEdge: Int,
-        val maxFps: Int,
-        val videoBitrateKbps: Int,
-        val audioBitrateKbps: Int,
-        val keepAudio: Boolean
     )
 
     private fun warning(code: String, message: String): MediaInfoWarning {
@@ -510,7 +590,7 @@ class NitroMediaKit constructor(private val applicationContext: Context) : Hybri
         val isRotated = rotationDegrees == 90 || rotationDegrees == 270
         val displayWidth = if (isRotated) bounds.outHeight else bounds.outWidth
         val displayHeight = if (isRotated) bounds.outWidth else bounds.outHeight
-        val hasAlpha = detectImageAlpha(localPath)
+        val hasAlpha = detectImageAlpha(localPath, bounds.outWidth, bounds.outHeight)
 
         return DetectedImageInfo(
             width = bounds.outWidth,
@@ -545,8 +625,13 @@ class NitroMediaKit constructor(private val applicationContext: Context) : Hybri
                 retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toIntOrNull()
             var height =
                 retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toIntOrNull()
-            var fps =
-                retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_CAPTURE_FRAMERATE)?.toDoubleOrNull()
+            var fps: Double? = null
+            var mimeType = "video/avc"
+            var hdr = false
+            var bitDepth = 0
+            var bitrate: Double? = null
+            var channels = 0
+            var sampleRate = 0
 
             extractor = MediaExtractor().apply { setDataSource(localPath) }
             var audioTracks = 0
@@ -555,11 +640,25 @@ class NitroMediaKit constructor(private val applicationContext: Context) : Hybri
                 val format = extractor.getTrackFormat(i)
                 val mime = format.getString(MediaFormat.KEY_MIME) ?: ""
                 if (mime.startsWith("video/")) {
+                    if (hasVideoTrack) continue
                     hasVideoTrack = true
-                    if (width == null && format.containsKey(MediaFormat.KEY_WIDTH)) {
+                    mimeType = mime
+                    val transfer = if (format.containsKey(MediaFormat.KEY_COLOR_TRANSFER)) format.getInteger(MediaFormat.KEY_COLOR_TRANSFER) else 0
+                    hdr = transfer == MediaFormat.COLOR_TRANSFER_ST2084 || transfer == MediaFormat.COLOR_TRANSFER_HLG
+                    val profile = if (format.containsKey(MediaFormat.KEY_PROFILE)) format.getInteger(MediaFormat.KEY_PROFILE) else 0
+                    bitDepth = when {
+                        hdr -> 10
+                        mime == "video/hevc" && profile in listOf(2, 4096, 8192) -> 10
+                        mime == "video/hevc" && profile == 1 -> 8
+                        mime == "video/avc" && profile == 16 -> 10
+                        mime == "video/avc" && profile in listOf(1, 2, 4, 8, 65536, 524288) -> 8
+                        else -> 0
+                    }
+                    bitrate = if (format.containsKey(MediaFormat.KEY_BIT_RATE)) format.getInteger(MediaFormat.KEY_BIT_RATE) / 1000.0 else null
+                    if ((width ?: 0) <= 0 && format.containsKey(MediaFormat.KEY_WIDTH)) {
                         width = format.getInteger(MediaFormat.KEY_WIDTH)
                     }
-                    if (height == null && format.containsKey(MediaFormat.KEY_HEIGHT)) {
+                    if ((height ?: 0) <= 0 && format.containsKey(MediaFormat.KEY_HEIGHT)) {
                         height = format.getInteger(MediaFormat.KEY_HEIGHT)
                     }
                     if (fps == null && format.containsKey(MediaFormat.KEY_FRAME_RATE)) {
@@ -568,6 +667,10 @@ class NitroMediaKit constructor(private val applicationContext: Context) : Hybri
                     }
                 } else if (mime.startsWith("audio/")) {
                     audioTracks++
+                    if (audioTracks == 1) {
+                        channels = if (format.containsKey(MediaFormat.KEY_CHANNEL_COUNT)) format.getInteger(MediaFormat.KEY_CHANNEL_COUNT) else 2
+                        sampleRate = if (format.containsKey(MediaFormat.KEY_SAMPLE_RATE)) format.getInteger(MediaFormat.KEY_SAMPLE_RATE) else 44100
+                    }
                 }
             }
 
@@ -575,10 +678,19 @@ class NitroMediaKit constructor(private val applicationContext: Context) : Hybri
                 throw UnsupportedMediaException("No video track found in input.")
             }
 
+            if (fps == null || !fps.isFinite() || fps <= 0) {
+                val videoIndex = (0 until extractor.trackCount).first { extractor.getTrackFormat(it).getString(MediaFormat.KEY_MIME)?.startsWith("video/") == true }
+                extractor.selectTrack(videoIndex)
+                val times = mutableListOf<Long>()
+                repeat(120) { if (extractor.sampleTime >= 0) { times.add(extractor.sampleTime); extractor.advance() } }
+                val sorted = times.distinct().sorted()
+                val gaps = sorted.zipWithNext { x, y -> y - x }.filter { it > 0 }.sorted()
+                if (gaps.isNotEmpty()) fps = 1_000_000.0 / gaps[gaps.size / 2]
+            }
             require(durationMs.isFinite() && durationMs > 0) { "Invalid video duration." }
-            val safeWidth = (width ?: 0).coerceAtLeast(1)
-            val safeHeight = (height ?: 0).coerceAtLeast(1)
-            val safeFps = (fps ?: 30.0).takeIf { it.isFinite() && it > 0 } ?: 30.0
+            val safeWidth = requireNotNull(width).also { require(it > 0) { "Invalid video width." } }
+            val safeHeight = requireNotNull(height).also { require(it > 0) { "Invalid video height." } }
+            val safeFps = fps?.takeIf { it.isFinite() && it > 0 } ?: 0.0
             val normalizedRotation = normalizeRotationDegrees(rotationDegrees)
             val isRotated = normalizedRotation == 90 || normalizedRotation == 270
             val displayWidth = if (isRotated) safeHeight else safeWidth
@@ -594,7 +706,7 @@ class NitroMediaKit constructor(private val applicationContext: Context) : Hybri
                 fps = safeFps,
                 sizeBytes = sizeBytes,
                 audioTracks = audioTracks,
-                extension = extension
+                extension = extension, mime = mimeType, hdr = hdr, bitDepth = bitDepth, bitrateKbps = bitrate, audioChannels = channels, audioSampleRate = sampleRate
             )
         } finally {
             runCatching { extractor?.release() }
@@ -612,6 +724,9 @@ class NitroMediaKit constructor(private val applicationContext: Context) : Hybri
         val warnings = mutableListOf<MediaInfoWarning>()
         val plan = resolveImageCompressionPlan(imageInfo, options)
         val imageOptions = options.image
+        if (plan.maxLongEdge < (imageOptions?.maxLongEdge?.toInt() ?: maxOf(imageInfo.displayWidth, imageInfo.displayHeight))) {
+            warnings += warning("IMAGE_SIZE_LIMIT", "Output dimensions are bounded by the preset and image memory budget.")
+        }
 
         if (plan.format == CompressImageFormat.PNG && imageOptions?.quality != null) {
             warnings += warning(
@@ -628,23 +743,25 @@ class NitroMediaKit constructor(private val applicationContext: Context) : Hybri
             )
         }
 
-        val decodeSampleSize = calculateInSampleSize(
+        val decodeSampleSize = ExportPlanner.sampleSize(
             width = imageInfo.width,
             height = imageInfo.height,
             targetLongEdge = plan.maxLongEdge
         )
-        val decodedBitmap = BitmapFactory.decodeFile(
-            localPath,
-            BitmapFactory.Options().apply {
-                inSampleSize = decodeSampleSize
-                inPreferredConfig = Bitmap.Config.ARGB_8888
+        val decodedBitmap = if (Build.VERSION.SDK_INT >= 28) {
+            val (w, h) = computeScaledDimensions(imageInfo.displayWidth, imageInfo.displayHeight, plan.maxLongEdge)
+            ImageDecoder.decodeBitmap(ImageDecoder.createSource(File(localPath))) { decoder, _, _ ->
+                decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
+                decoder.setTargetSize(w, h)
             }
-        ) ?: throw UnsupportedMediaException("Unable to decode image input.")
+        } else BitmapFactory.decodeFile(localPath, BitmapFactory.Options().apply {
+            inSampleSize = decodeSampleSize; inPreferredConfig = Bitmap.Config.ARGB_8888
+        }) ?: throw UnsupportedMediaException("Unable to decode image input.")
 
         var orientedBitmap: Bitmap? = null
         var resizedBitmap: Bitmap? = null
         try {
-            orientedBitmap = applyExifOrientation(
+            orientedBitmap = if (Build.VERSION.SDK_INT >= 28) decodedBitmap else applyExifOrientation(
                 bitmap = decodedBitmap,
                 orientation = readImageExifOrientation(localPath)
             )
@@ -755,7 +872,8 @@ class NitroMediaKit constructor(private val applicationContext: Context) : Hybri
                 else -> minOf(sourceLongEdge, 1600)
             }
 
-            CompressionPreset.HIGH -> minOf(sourceLongEdge, 2560)
+            CompressionPreset.PRESERVE -> sourceLongEdge
+            CompressionPreset.HIGH -> minOf(sourceLongEdge, 4096)
             CompressionPreset.BALANCED -> minOf(sourceLongEdge, 1920)
             CompressionPreset.SMALL -> minOf(sourceLongEdge, 1280)
         }
@@ -765,10 +883,10 @@ class NitroMediaKit constructor(private val applicationContext: Context) : Hybri
             require(value <= 8192) { "image.maxLongEdge must not exceed 8192." }
             value.roundToInt()
         }
-        val targetLongEdge = minOf(
+        val targetLongEdge = ExportPlanner.imageEdge(info.displayWidth, info.displayHeight, minOf(
             sourceLongEdge,
             (manualLongEdge ?: presetLongEdge).coerceAtLeast(2)
-        )
+        ), manualLongEdge != null, Runtime.getRuntime().maxMemory() / if (Build.VERSION.SDK_INT < 28) 2 else 1)
 
         val explicitFormat = imageOptions?.format ?: CompressImageFormat.AUTO
         val outputFormat = when (explicitFormat) {
@@ -791,7 +909,8 @@ class NitroMediaKit constructor(private val applicationContext: Context) : Hybri
                 else -> 0.74
             }
 
-            CompressionPreset.HIGH -> 0.9
+            CompressionPreset.PRESERVE -> 1.0
+            CompressionPreset.HIGH -> 0.94
             CompressionPreset.BALANCED -> 0.82
             CompressionPreset.SMALL -> 0.72
         }
@@ -809,102 +928,6 @@ class NitroMediaKit constructor(private val applicationContext: Context) : Hybri
         )
     }
 
-    private fun resolveVideoCompressionPlan(
-        info: DetectedVideoInfo,
-        options: ResolvedCompressOptions
-    ): VideoCompressionPlan {
-        val videoOptions = options.video
-        val durationSec = (info.durationMs / 1000.0).coerceAtLeast(0.001)
-        val sourceLongEdge = maxOf(info.displayWidth, info.displayHeight)
-        val sourceFps = if (info.fps.isFinite() && info.fps > 0) info.fps else 30.0
-        val inputBitrateKbps = (info.sizeBytes.toDouble() * 8.0) / durationSec / 1000.0
-
-        val presetLongEdge = when (options.preset) {
-            CompressionPreset.AUTO -> when {
-                sourceLongEdge > 1920 -> 1280
-                durationSec > 120.0 -> minOf(sourceLongEdge, 720)
-                durationSec > 30.0 -> minOf(sourceLongEdge, 960)
-                else -> minOf(sourceLongEdge, 1080)
-            }
-
-            CompressionPreset.HIGH -> minOf(sourceLongEdge, 1280)
-            CompressionPreset.BALANCED -> minOf(sourceLongEdge, 960)
-            CompressionPreset.SMALL -> minOf(sourceLongEdge, 720)
-        }
-
-        val presetFps = when (options.preset) {
-            CompressionPreset.AUTO -> minOf(sourceFps, 30.0)
-            CompressionPreset.HIGH -> minOf(sourceFps, 30.0)
-            CompressionPreset.BALANCED -> minOf(sourceFps, 30.0)
-            CompressionPreset.SMALL -> minOf(sourceFps, 24.0)
-        }
-
-        val presetVideoBitrate = when (options.preset) {
-            CompressionPreset.AUTO -> {
-                val base = when {
-                    presetLongEdge <= 480 -> 700.0
-                    presetLongEdge <= 720 -> 1200.0
-                    presetLongEdge <= 960 -> 1800.0
-                    else -> 2600.0
-                }
-                val durationMultiplier = when {
-                    durationSec <= 30.0 -> 1.15
-                    durationSec <= 120.0 -> 1.0
-                    else -> 0.82
-                }
-                val target = clampDouble(base * durationMultiplier, 600.0, 3200.0)
-                minOf(target, maxOf(600.0, inputBitrateKbps * 0.85))
-            }
-
-            CompressionPreset.HIGH -> 2800.0
-            CompressionPreset.BALANCED -> 1800.0
-            CompressionPreset.SMALL -> 1100.0
-        }
-
-        val presetAudioBitrate = when (options.preset) {
-            CompressionPreset.AUTO -> when {
-                durationSec > 300.0 -> 64.0
-                durationSec <= 30.0 -> 128.0
-                else -> 96.0
-            }
-
-            CompressionPreset.HIGH -> 128.0
-            CompressionPreset.BALANCED -> 96.0
-            CompressionPreset.SMALL -> 64.0
-        }
-
-        val overrideLongEdge = videoOptions?.maxLongEdge?.also { requirePositiveFinite(it, "video.maxLongEdge"); require(it <= 8192) { "video.maxLongEdge must not exceed 8192." } }
-        val overrideFps = videoOptions?.maxFps?.also { requirePositiveFinite(it, "video.maxFps") }
-        val overrideVideoBitrate =
-            videoOptions?.videoBitrateKbps?.also { requirePositiveFinite(it, "video.videoBitrateKbps") }
-        val overrideAudioBitrate =
-            videoOptions?.audioBitrateKbps?.also { requirePositiveFinite(it, "video.audioBitrateKbps") }
-
-        return VideoCompressionPlan(
-            maxLongEdge = minOf(
-                sourceLongEdge,
-                (overrideLongEdge?.roundToInt() ?: presetLongEdge).coerceAtLeast(2)
-            ),
-            maxFps = minOf(sourceFps, overrideFps ?: presetFps).roundToInt().coerceIn(1, 120),
-            videoBitrateKbps = (overrideVideoBitrate ?: presetVideoBitrate).roundToInt().coerceIn(300, 12_000),
-            audioBitrateKbps = (overrideAudioBitrate ?: presetAudioBitrate).roundToInt().coerceIn(32, 320),
-            keepAudio = videoOptions?.keepAudio ?: true
-        )
-    }
-
-    private fun calculateInSampleSize(width: Int, height: Int, targetLongEdge: Int): Int {
-        var inSampleSize = 1
-        val sourceLongEdge = maxOf(width, height)
-        if (targetLongEdge <= 0 || sourceLongEdge <= targetLongEdge) {
-            return inSampleSize
-        }
-
-        while ((sourceLongEdge / (inSampleSize * 2)) >= targetLongEdge) {
-            inSampleSize *= 2
-        }
-        return inSampleSize.coerceAtLeast(1)
-    }
-
     private fun computeScaledDimensions(width: Int, height: Int, maxLongEdge: Int): Pair<Int, Int> {
         val safeWidth = width.coerceAtLeast(1)
         val safeHeight = height.coerceAtLeast(1)
@@ -918,10 +941,6 @@ class NitroMediaKit constructor(private val applicationContext: Context) : Hybri
         val scaledWidth = maxOf(1, (safeWidth * scale).roundToInt())
         val scaledHeight = maxOf(1, (safeHeight * scale).roundToInt())
         return scaledWidth to scaledHeight
-    }
-
-    private fun clampDouble(value: Double, min: Double, max: Double): Double {
-        return kotlin.math.max(min, kotlin.math.min(max, value))
     }
 
     private fun requireFinite(value: Double, name: String) {
@@ -997,12 +1016,12 @@ class NitroMediaKit constructor(private val applicationContext: Context) : Hybri
         return Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
     }
 
-    private fun detectImageAlpha(path: String): Boolean {
+    private fun detectImageAlpha(path: String, width: Int, height: Int): Boolean {
         val bitmap = BitmapFactory.decodeFile(
             path,
             BitmapFactory.Options().apply {
                 inPreferredConfig = Bitmap.Config.ARGB_8888
-                inSampleSize = 128
+                inSampleSize = ExportPlanner.sampleSize(width, height, 64)
             }
         ) ?: return false
         return try {
