@@ -1,0 +1,52 @@
+diff --git a/lib/syntax/swift/SwiftCxxBridgedType.js b/lib/syntax/swift/SwiftCxxBridgedType.js
+index 9ad571e6b79050e5c0fdbe340605859f100a3aa5..0d7ddae98e003f8fd5ddcdabec00765ace5e8bd6 100644
+--- a/lib/syntax/swift/SwiftCxxBridgedType.js
++++ b/lib/syntax/swift/SwiftCxxBridgedType.js
+@@ -470,7 +470,20 @@ export class SwiftCxxBridgedType {
+                 switch (language) {
+                     case 'swift':
+                         // We have to iterate the element one by one to create a resulting Array (mapped)
+-                        return `${cppParameterName}.map({ __item in ${wrapping.parseFromCppToSwift('__item', 'swift')} })`.trim();
++                        // Indexed conversion avoids Swift 6.2's unreliable synthesized Collection
++            // conformance for vectors of generated custom C++ structs.
++            return `{
++  () -> ${array.getCode('swift')} in
++  let __vector = ${cppParameterName}
++  let __count = Int(__vector.size())
++  var __result: ${array.getCode('swift')} = []
++  __result.reserveCapacity(__count)
++  for __index in 0..<__count {
++    let __item = __vector[__index]
++    __result.append(${wrapping.parseFromCppToSwift('__item', 'swift')})
++  }
++  return __result
++}()`.trim();
+                     default:
+                         return cppParameterName;
+                 }
+diff --git a/src/syntax/swift/SwiftCxxBridgedType.ts b/src/syntax/swift/SwiftCxxBridgedType.ts
+index ab3eacba68ba40554a9c0a50ffdcd249d08a79ba..faa45fb2037d10455c01838542f4d264fdc457e4 100644
+--- a/src/syntax/swift/SwiftCxxBridgedType.ts
++++ b/src/syntax/swift/SwiftCxxBridgedType.ts
+@@ -511,7 +511,20 @@ export class SwiftCxxBridgedType implements BridgedType<'swift', 'c++'> {
+         switch (language) {
+           case 'swift':
+             // We have to iterate the element one by one to create a resulting Array (mapped)
+-            return `${cppParameterName}.map({ __item in ${wrapping.parseFromCppToSwift('__item', 'swift')} })`.trim()
++            // Indexed conversion avoids Swift 6.2's unreliable synthesized Collection
++            // conformance for vectors of generated custom C++ structs.
++            return `{
++  () -> ${array.getCode('swift')} in
++  let __vector = ${cppParameterName}
++  let __count = Int(__vector.size())
++  var __result: ${array.getCode('swift')} = []
++  __result.reserveCapacity(__count)
++  for __index in 0..<__count {
++    let __item = __vector[__index]
++    __result.append(${wrapping.parseFromCppToSwift('__item', 'swift')})
++  }
++  return __result
++}()`.trim()
+           default:
+             return cppParameterName
+         }

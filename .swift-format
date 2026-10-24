@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "indentation": { "spaces": 2 },
+  "lineLength": 100,
+  "rules": {
+    "FileScopedDeclarationPrivacy": false,
+    "FullyIndirectEnum": false,
+    "NoAccessLevelOnExtensionDeclaration": false,
+    "NoAssignmentInExpressions": false,
+    "NoCasesWithOnlyFallthrough": false,
+    "OnlyOneTrailingClosureArgument": false,
+    "ReplaceForEachWithForLoop": false,
+    "UseExplicitNilCheckInConditions": false,
+    "UseSynthesizedInitializer": false
+  }
+}

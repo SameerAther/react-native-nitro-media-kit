@@ -49,3 +49,38 @@ export const deleteGeneratedFile: NitroMediaKitObject['deleteGeneratedFile'] = (
 
 export { createVideoJob, exportVideo } from './jobs';
 export type { VideoJob } from './jobs';
+
+/** Native-owned asset and export APIs. Heavy work stays off the JavaScript thread. */
+export const openMedia: NitroMediaKitObject['openMedia'] = (uri, limits) =>
+  NitroMediaKit.openMedia(uri, limits);
+export const getCapabilities: NitroMediaKitObject['getCapabilities'] = () =>
+  NitroMediaKit.getCapabilities();
+export const planExport: NitroMediaKitObject['planExport'] = (uri, options) =>
+  NitroMediaKit.planExport(uri, options);
+export const createExport: NitroMediaKitObject['createExport'] = (
+  uri,
+  options,
+  onProgress
+) => NitroMediaKit.createExport(uri, options, onProgress);
+export const createTimeline: NitroMediaKitObject['createTimeline'] = (
+  clips,
+  options,
+  onProgress
+) => NitroMediaKit.createTimeline(clips, options, onProgress);
+export const extractThumbnails: NitroMediaKitObject['extractThumbnails'] = (
+  uri,
+  options
+) => NitroMediaKit.extractThumbnails(uri, options);
+export const extractAudio: NitroMediaKitObject['extractAudio'] = (
+  uri,
+  options
+) => NitroMediaKit.extractAudio(uri, options);
+
+export const analyzeAudio: NitroMediaKitObject['analyzeAudio'] = (
+  uri,
+  options
+) => NitroMediaKit.analyzeAudio(uri, options);
+export const normalizeAudio: NitroMediaKitObject['normalizeAudio'] = (
+  uri,
+  options
+) => NitroMediaKit.normalizeAudio(uri, options);

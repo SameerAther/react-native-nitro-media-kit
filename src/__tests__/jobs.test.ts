@@ -1,65 +1,72 @@
 import { NitroMediaKit } from '../native';
 import { createVideoJob, exportVideo } from '../jobs';
-import type {
-  ExportProgress,
-  ExportVideoOptions,
-} from '../NitroMediaKit.nitro';
+import type { ExportVideoOptions } from '../NitroMediaKit.nitro';
 
+const mockCompletion = {
+  outputUri: '/output.mp4',
+  media: { width: 1920 },
+  warnings: [],
+};
+const mockJob = {
+  id: 'native-id',
+  result: jest.fn(() => Promise.resolve(mockCompletion)),
+  cancel: jest.fn(() => true),
+};
 jest.mock('../native', () => ({
-  NitroMediaKit: {
-    exportVideo: jest.fn(() =>
-      Promise.resolve({ ok: true, operation: 'exportVideo', type: 'video' })
-    ),
-    cancelJob: jest.fn(() => Promise.resolve(true)),
-  },
+  NitroMediaKit: { createExport: jest.fn(() => mockJob) },
 }));
-
 beforeEach(() => jest.clearAllMocks());
 
-test('starts one native export with a snapshot and forwards the progress callback', async () => {
+test('compatibility wrapper uses a native-owned job and snapshots nested edit options', async () => {
   const options: ExportVideoOptions = {
-    trim: { startMs: 0, endMs: 2000 },
-    watermark: 'Brand',
-    watermarkOptions: { opacity: 0.5 },
-    video: { maxFps: 23.976, frameRatePolicy: 'cap', colorPolicy: 'preserve' },
-    limits: { timeoutMs: 30000 },
+    geometry: { crop: { x: 0, y: 0, width: 100, height: 200 } },
+    overlays: [
+      { kind: 'image', uri: '/logo.png', x: 0, y: 0, width: 20, height: 20 },
+    ],
+    audioEdit: {
+      musicUri: '/music.m4a',
+      musicTrim: { startMs: 0, endMs: 1000 },
+    },
   };
-  const progress = jest.fn<void, [ExportProgress]>();
+  const progress = jest.fn();
   const job = createVideoJob('/input.mp4', options, progress);
-  options.video!.maxFps = 60;
-  options.trim!.endMs = 500;
-  options.limits!.timeoutMs = 1;
-  expect(NitroMediaKit.exportVideo).toHaveBeenCalledTimes(1);
-  expect(NitroMediaKit.exportVideo).toHaveBeenCalledWith(
+  options.geometry!.crop!.width = 50;
+  options.overlays![0]!.width = 10;
+  options.audioEdit!.musicTrim!.endMs = 500;
+  expect(NitroMediaKit.createExport).toHaveBeenCalledWith(
     '/input.mp4',
     expect.objectContaining({
-      trim: { startMs: 0, endMs: 2000 },
-      video: expect.objectContaining({ maxFps: 23.976 }),
-      limits: { timeoutMs: 30000 },
+      geometry: { crop: { x: 0, y: 0, width: 100, height: 200 } },
+      overlays: [expect.objectContaining({ width: 20 })],
+      audioEdit: expect.objectContaining({
+        musicTrim: { startMs: 0, endMs: 1000 },
+      }),
     }),
-    job.id,
     progress
   );
-  expect(Object.isFrozen(job)).toBe(true);
-  expect((await job.result).ok).toBe(true);
-  await expect(job.cancel()).resolves.toBe(true);
-  expect(NitroMediaKit.cancelJob).toHaveBeenCalledWith(job.id);
-});
-
-test('concurrent jobs receive distinct IDs and exportVideo returns the same native result', async () => {
-  const first = createVideoJob('/a.mp4');
-  const second = createVideoJob('/a.mp4');
-  expect(first.id).not.toBe(second.id);
-  await expect(exportVideo('/a.mp4')).resolves.toMatchObject({
+  expect(job.id).toBe('native-id');
+  await expect(job.result).resolves.toMatchObject({
     ok: true,
     operation: 'exportVideo',
+    outputUri: '/output.mp4',
   });
-  expect(NitroMediaKit.exportVideo).toHaveBeenCalledTimes(3);
+  await expect(job.cancel()).resolves.toBe(true);
+  expect(mockJob.cancel).toHaveBeenCalledTimes(1);
 });
 
-test('native cancellation and initialization failures remain observable', async () => {
-  jest
-    .mocked(NitroMediaKit.exportVideo)
-    .mockRejectedValueOnce(new Error('CANCELLED'));
-  await expect(createVideoJob('/a.mp4').result).rejects.toThrow('CANCELLED');
+test('legacy helper preserves terminal cancellation as a failure result', async () => {
+  mockJob.result.mockRejectedValueOnce(
+    new Error('[CANCELLED] Media job cancelled.')
+  );
+  await expect(exportVideo('/input.mp4')).resolves.toMatchObject({
+    ok: false,
+    error: { code: 'CANCELLED' },
+  });
+});
+
+test('initialization failures remain synchronous and observable', () => {
+  jest.mocked(NitroMediaKit.createExport).mockImplementationOnce(() => {
+    throw new Error('QUEUE_FULL');
+  });
+  expect(() => createVideoJob('/input.mp4')).toThrow('QUEUE_FULL');
 });

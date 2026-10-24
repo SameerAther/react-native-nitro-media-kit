@@ -42,6 +42,8 @@
     "nitrogen": "nitrogen src",
     "typecheck": "tsc",
     "lint": "eslint src example/src *.js *.mjs",
+    "format": "prettier --write . --ignore-unknown",
+    "format:check": "prettier --check . --ignore-unknown",
     "test": "jest",
     "release": "release-it --only-version",
     "test:native:android": "cd example/android && ./gradlew :app:connectedDebugAndroidTest",
@@ -180,5 +182,8 @@
       "release-it"
     ],
     "version": "0.56.0"
+  },
+  "resolutions": {
+    "nitrogen@0.37.1": "patch:nitrogen@npm%3A0.37.1#./.yarn/patches/nitrogen-npm-0.37.1-93004d996e.patch"
   }
 }

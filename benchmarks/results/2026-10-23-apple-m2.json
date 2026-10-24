@@ -1,0 +1,3518 @@
+{
+  "scope": "macOS host CPU only; no codec/GPU/Nitro bridge, native output quality or device performance measured",
+  "createdUtc": "2026-10-23T18:18:10Z",
+  "baselineRef": "v0.5.0",
+  "baselineCommit": "7047c095231e79994b9a2326c9e999432168f8d5",
+  "afterBaseCommit": "7047c095231e79994b9a2326c9e999432168f8d5",
+  "host": {
+    "model": "Mac14,2",
+    "cpu": "Apple M2",
+    "memoryBytes": 8589934592,
+    "os": "ProductName:\t\tmacOS\nProductVersion:\t\t26.6\nBuildVersion:\t\t25G70",
+    "swift": "Apple Swift version 6.2.3 (swiftlang-6.2.3.3.21 clang-1700.6.3.2)\nTarget: arm64-apple-macosx26.0"
+  },
+  "method": {
+    "optimization": "-O -whole-module-optimization",
+    "runs": 10,
+    "iterationsPerCasePerRun": 500000,
+    "warmupIterationsPerCase": 10000,
+    "order": "before/after on even runs, after/before on odd runs",
+    "timer": "DispatchTime.uptimeNanoseconds inside child; compile, startup and fixture creation excluded",
+    "boundaryTypes": "each revision uses its own tests/host/PlannerTypes.swift"
+  },
+  "sourceSha256": {
+    "before": "109b5dee5b386cfa85b7cbfb42b6657769e5770722ff0cdd8f2ebd3294c74461",
+    "after": "f9c41cd31dd9e972b1e06e9ddc7f07b8db2cd148bb7158e9b464b737eea2d2d1"
+  },
+  "plannerRawRuns": {
+    "before": [
+      {
+        "measurements": [
+          {
+            "checksum": 42869870030.228004,
+            "elapsedMs": 19.675292,
+            "iterations": 500000,
+            "name": "preserve-4k",
+            "nsPerOperation": 39.350584,
+            "output": {
+              "audio": "preserve",
+              "audioBitrateKbps": 384,
+              "bitrateKbps": 69603,
+              "canCopy": true,
+              "color": "preserve",
+              "durationMs": 10000,
+              "estimatedSizeBytes": 90189892.58164516,
+              "fps": 59.94005994005994,
+              "height": 2160,
+              "mime": "video/avc",
+              "timing": "preserve",
+              "width": 3840
+            }
+          },
+          {
+            "checksum": 9178200000,
+            "elapsedMs": 19.290875,
+            "iterations": 500000,
+            "name": "balanced-4k",
+            "nsPerOperation": 38.58175,
+            "output": {
+              "audio": "preserve",
+              "audioBitrateKbps": 384,
+              "bitrateKbps": 5288,
+              "canCopy": false,
+              "color": "preserve",
+              "durationMs": 10000,
+              "estimatedSizeBytes": 7308865.979381444,
+              "fps": 30,
+              "height": 1080,
+              "mime": "video/avc",
+              "timing": "cap",
+              "width": 1920
+            }
+          },
+          {
+            "checksum": 6743800000,
+            "elapsedMs": 19.225959,
+            "iterations": 500000,
+            "name": "small-4k",
+            "nsPerOperation": 38.451918,
+            "output": {
+              "audio": "preserve",
+              "audioBitrateKbps": 384,
+              "bitrateKbps": 1438,
+              "canCopy": false,
+              "color": "preserve",
+              "durationMs": 10000,
+              "estimatedSizeBytes": 2347546.3917525774,
+              "fps": 24,
+              "height": 720,
+              "mime": "video/avc",
+              "timing": "cap",
+              "width": 1280
+            }
+          },
+          {
+            "checksum": 9256370029.915058,
+            "elapsedMs": 20.970834,
+            "iterations": 500000,
+            "name": "target-size-trim",
+            "nsPerOperation": 41.941668,
+            "output": {
+              "audio": "preserve",
+              "audioBitrateKbps": 384,
+              "bitrateKbps": 7376,
+              "canCopy": false,
+              "color": "preserve",
+              "durationMs": 5000,
+              "estimatedSizeBytes": 5000000,
+              "fps": 59.94005994005994,
+              "height": 2160,
+              "mime": "video/avc",
+              "timing": "preserve",
+              "width": 3840
+            }
+          },
+          {
+            "checksum": 42869870030.228004,
+            "elapsedMs": 18.661083,
+            "iterations": 500000,
+            "name": "watermark-4k",
+            "nsPerOperation": 37.322166,
+            "output": {
+              "audio": "preserve",
+              "audioBitrateKbps": 384,
+              "bitrateKbps": 69603,
+              "canCopy": false,
+              "color": "preserve",
+              "durationMs": 10000,
+              "estimatedSizeBytes": 90189892.58164516,
+              "fps": 59.94005994005994,
+              "height": 2160,
+              "mime": "video/avc",
+              "timing": "preserve",
+              "width": 3840
+            }
+          },
+          {
+            "checksum": 30689370029.856236,
+            "elapsedMs": 17.72725,
+            "iterations": 500000,
+            "name": "hdr-preserve-4k",
+            "nsPerOperation": 35.4545,
+            "output": {
+              "audio": "preserve",
+              "audioBitrateKbps": 384,
+              "bitrateKbps": 45242,
+              "canCopy": true,
+              "color": "preserve",
+              "durationMs": 10000,
+              "estimatedSizeBytes": 58796626.05435803,
+              "fps": 59.94005994005994,
+              "height": 2160,
+              "mime": "video/hevc",
+              "timing": "preserve",
+              "width": 3840
+            }
+          },
+          {
+            "checksum": 28050400000,
+            "elapsedMs": 20.42475,
+            "iterations": 500000,
+            "name": "constant-24fps",
+            "nsPerOperation": 40.8495,
+            "output": {
+              "audio": "preserve",
+              "audioBitrateKbps": 384,
+              "bitrateKbps": 40000,
+              "canCopy": false,
+              "color": "preserve",
+              "durationMs": 10000,
+              "estimatedSizeBytes": 52041237.11340206,
+              "fps": 24,
+              "height": 2160,
+              "mime": "video/avc",
+              "timing": "constant",
+              "width": 3840
+            }
+          }
+        ],
+        "processPeakResidentBytes": 6324224
+      },
+      {
+        "measurements": [
+          {
+            "checksum": 42869870030.228004,
+            "elapsedMs": 19.72975,
+            "iterations": 500000,
+            "name": "preserve-4k",
+            "nsPerOperation": 39.4595,
+            "output": {
+              "audio": "preserve",
+              "audioBitrateKbps": 384,
+              "bitrateKbps": 69603,
+              "canCopy": true,
+              "color": "preserve",
+              "durationMs": 10000,
+              "estimatedSizeBytes": 90189892.58164516,
+              "fps": 59.94005994005994,
+              "height": 2160,
+              "mime": "video/avc",
+              "timing": "preserve",
+              "width": 3840
+            }
+          },
+          {
+            "checksum": 9178200000,
+            "elapsedMs": 19.002834,
+            "iterations": 500000,
+            "name": "balanced-4k",
+            "nsPerOperation": 38.005668,
+            "output": {
+              "audio": "preserve",
+              "audioBitrateKbps": 384,
+              "bitrateKbps": 5288,
+              "canCopy": false,
+              "color": "preserve",
+              "durationMs": 10000,
+              "estimatedSizeBytes": 7308865.979381444,
+              "fps": 30,
+              "height": 1080,
+              "mime": "video/avc",
+              "timing": "cap",
+              "width": 1920
+            }
+          },
+          {
+            "checksum": 6743800000,
+            "elapsedMs": 19.171,
+            "iterations": 500000,
+            "name": "small-4k",
+            "nsPerOperation": 38.342,
+            "output": {
+              "audio": "preserve",
+              "audioBitrateKbps": 384,
+              "bitrateKbps": 1438,
+              "canCopy": false,
+              "color": "preserve",
+              "durationMs": 10000,
+              "estimatedSizeBytes": 2347546.3917525774,
+              "fps": 24,
+              "height": 720,
+              "mime": "video/avc",
+              "timing": "cap",
+              "width": 1280
+            }
+          },
+          {
+            "checksum": 9256370029.915058,
+            "elapsedMs": 20.887875,
+            "iterations": 500000,
+            "name": "target-size-trim",
+            "nsPerOperation": 41.77575,
+            "output": {
+              "audio": "preserve",
+              "audioBitrateKbps": 384,
+              "bitrateKbps": 7376,
+              "canCopy": false,
+              "color": "preserve",
+              "durationMs": 5000,
+              "estimatedSizeBytes": 5000000,
+              "fps": 59.94005994005994,
+              "height": 2160,
+              "mime": "video/avc",
+              "timing": "preserve",
+              "width": 3840
+            }
+          },
+          {
+            "checksum": 42869870030.228004,
+            "elapsedMs": 18.932041,
+            "iterations": 500000,
+            "name": "watermark-4k",
+            "nsPerOperation": 37.864082,
+            "output": {
+              "audio": "preserve",
+              "audioBitrateKbps": 384,
+              "bitrateKbps": 69603,
+              "canCopy": false,
+              "color": "preserve",
+              "durationMs": 10000,
+              "estimatedSizeBytes": 90189892.58164516,
+              "fps": 59.94005994005994,
+              "height": 2160,
+              "mime": "video/avc",
+              "timing": "preserve",
+              "width": 3840
+            }
+          },
+          {
+            "checksum": 30689370029.856236,
+            "elapsedMs": 17.776125,
+            "iterations": 500000,
+            "name": "hdr-preserve-4k",
+            "nsPerOperation": 35.55225,
+            "output": {
+              "audio": "preserve",
+              "audioBitrateKbps": 384,
+              "bitrateKbps": 45242,
+              "canCopy": true,
+              "color": "preserve",
+              "durationMs": 10000,
+              "estimatedSizeBytes": 58796626.05435803,
+              "fps": 59.94005994005994,
+              "height": 2160,
+              "mime": "video/hevc",
+              "timing": "preserve",
+              "width": 3840
+            }
+          },
+          {
+            "checksum": 28050400000,
+            "elapsedMs": 20.389292,
+            "iterations": 500000,
+            "name": "constant-24fps",
+            "nsPerOperation": 40.778584,
+            "output": {
+              "audio": "preserve",
+              "audioBitrateKbps": 384,
+              "bitrateKbps": 40000,
+              "canCopy": false,
+              "color": "preserve",
+              "durationMs": 10000,
+              "estimatedSizeBytes": 52041237.11340206,
+              "fps": 24,
+              "height": 2160,
+              "mime": "video/avc",
+              "timing": "constant",
+              "width": 3840
+            }
+          }
+        ],
+        "processPeakResidentBytes": 6324224
+      },
+      {
+        "measurements": [
+          {
+            "checksum": 42869870030.228004,
+            "elapsedMs": 19.629916,
+            "iterations": 500000,
+            "name": "preserve-4k",
+            "nsPerOperation": 39.259832,
+            "output": {
+              "audio": "preserve",
+              "audioBitrateKbps": 384,
+              "bitrateKbps": 69603,
+              "canCopy": true,
+              "color": "preserve",
+              "durationMs": 10000,
+              "estimatedSizeBytes": 90189892.58164516,
+              "fps": 59.94005994005994,
+              "height": 2160,
+              "mime": "video/avc",
+              "timing": "preserve",
+              "width": 3840
+            }
+          },
+          {
+            "checksum": 9178200000,
+            "elapsedMs": 19.065958,
+            "iterations": 500000,
+            "name": "balanced-4k",
+            "nsPerOperation": 38.131916,
+            "output": {
+              "audio": "preserve",
+              "audioBitrateKbps": 384,
+              "bitrateKbps": 5288,
+              "canCopy": false,
+              "color": "preserve",
+              "durationMs": 10000,
+              "estimatedSizeBytes": 7308865.979381444,
+              "fps": 30,
+              "height": 1080,
+              "mime": "video/avc",
+              "timing": "cap",
+              "width": 1920
+            }
+          },
+          {
+            "checksum": 6743800000,
+            "elapsedMs": 19.177291,
+            "iterations": 500000,
+            "name": "small-4k",
+            "nsPerOperation": 38.354582,
+            "output": {
+              "audio": "preserve",
+              "audioBitrateKbps": 384,
+              "bitrateKbps": 1438,
+              "canCopy": false,
+              "color": "preserve",
+              "durationMs": 10000,
+              "estimatedSizeBytes": 2347546.3917525774,
+              "fps": 24,
+              "height": 720,
+              "mime": "video/avc",
+              "timing": "cap",
+              "width": 1280
+            }
+          },
+          {
+            "checksum": 9256370029.915058,
+            "elapsedMs": 20.891042,
+            "iterations": 500000,
+            "name": "target-size-trim",
+            "nsPerOperation": 41.782084,
+            "output": {
+              "audio": "preserve",
+              "audioBitrateKbps": 384,
+              "bitrateKbps": 7376,
+              "canCopy": false,
+              "color": "preserve",
+              "durationMs": 5000,
+              "estimatedSizeBytes": 5000000,
+              "fps": 59.94005994005994,
+              "height": 2160,
+              "mime": "video/avc",
+              "timing": "preserve",
+              "width": 3840
+            }
+          },
+          {
+            "checksum": 42869870030.228004,
+            "elapsedMs": 19.006083,
+            "iterations": 500000,
+            "name": "watermark-4k",
+            "nsPerOperation": 38.012166,
+            "output": {
+              "audio": "preserve",
+              "audioBitrateKbps": 384,
+              "bitrateKbps": 69603,
+              "canCopy": false,
+              "color": "preserve",
+              "durationMs": 10000,
+              "estimatedSizeBytes": 90189892.58164516,
+              "fps": 59.94005994005994,
+              "height": 2160,
+              "mime": "video/avc",
+              "timing": "preserve",
+              "width": 3840
+            }
+          },
+          {
+            "checksum": 30689370029.856236,
+            "elapsedMs": 17.701792,
+            "iterations": 500000,
+            "name": "hdr-preserve-4k",
+            "nsPerOperation": 35.403584,
+            "output": {
+              "audio": "preserve",
+              "audioBitrateKbps": 384,
+              "bitrateKbps": 45242,
+              "canCopy": true,
+              "color": "preserve",
+              "durationMs": 10000,
+              "estimatedSizeBytes": 58796626.05435803,
+              "fps": 59.94005994005994,
+              "height": 2160,
+              "mime": "video/hevc",
+              "timing": "preserve",
+              "width": 3840
+            }
+          },
+          {
+            "checksum": 28050400000,
+            "elapsedMs": 20.481084,
+            "iterations": 500000,
+            "name": "constant-24fps",
+            "nsPerOperation": 40.962168,
+            "output": {
+              "audio": "preserve",
+              "audioBitrateKbps": 384,
+              "bitrateKbps": 40000,
+              "canCopy": false,
+              "color": "preserve",
+              "durationMs": 10000,
+              "estimatedSizeBytes": 52041237.11340206,
+              "fps": 24,
+              "height": 2160,
+              "mime": "video/avc",
+              "timing": "constant",
+              "width": 3840
+            }
+          }
+        ],
+        "processPeakResidentBytes": 6324224
+      },
+      {
+        "measurements": [
+          {
+            "checksum": 42869870030.228004,
+            "elapsedMs": 19.664417,
+            "iterations": 500000,
+            "name": "preserve-4k",
+            "nsPerOperation": 39.328834,
+            "output": {
+              "audio": "preserve",
+              "audioBitrateKbps": 384,
+              "bitrateKbps": 69603,
+              "canCopy": true,
+              "color": "preserve",
+              "durationMs": 10000,
+              "estimatedSizeBytes": 90189892.58164516,
+              "fps": 59.94005994005994,
+              "height": 2160,
+              "mime": "video/avc",
+              "timing": "preserve",
+              "width": 3840
+            }
+          },
+          {
+            "checksum": 9178200000,
+            "elapsedMs": 19.097917,
+            "iterations": 500000,
+            "name": "balanced-4k",
+            "nsPerOperation": 38.195834,
+            "output": {
+              "audio": "preserve",
+              "audioBitrateKbps": 384,
+              "bitrateKbps": 5288,
+              "canCopy": false,
+              "color": "preserve",
+              "durationMs": 10000,
+              "estimatedSizeBytes": 7308865.979381444,
+              "fps": 30,
+              "height": 1080,
+              "mime": "video/avc",
+              "timing": "cap",
+              "width": 1920
+            }
+          },
+          {
+            "checksum": 6743800000,
+            "elapsedMs": 19.302375,
+            "iterations": 500000,
+            "name": "small-4k",
+            "nsPerOperation": 38.60475,
+            "output": {
+              "audio": "preserve",
+              "audioBitrateKbps": 384,
+              "bitrateKbps": 1438,
+              "canCopy": false,
+              "color": "preserve",
+              "durationMs": 10000,
+              "estimatedSizeBytes": 2347546.3917525774,
+              "fps": 24,
+              "height": 720,
+              "mime": "video/avc",
+              "timing": "cap",
+              "width": 1280
+            }
+          },
+          {
+            "checksum": 9256370029.915058,
+            "elapsedMs": 20.934834,
+            "iterations": 500000,
+            "name": "target-size-trim",
+            "nsPerOperation": 41.869668,
+            "output": {
+              "audio": "preserve",
+              "audioBitrateKbps": 384,
+              "bitrateKbps": 7376,
+              "canCopy": false,
+              "color": "preserve",
+              "durationMs": 5000,
+              "estimatedSizeBytes": 5000000,
+              "fps": 59.94005994005994,
+              "height": 2160,
+              "mime": "video/avc",
+              "timing": "preserve",
+              "width": 3840
+            }
+          },
+          {
+            "checksum": 42869870030.228004,
+            "elapsedMs": 18.932125,
+            "iterations": 500000,
+            "name": "watermark-4k",
+            "nsPerOperation": 37.86425,
+            "output": {
+              "audio": "preserve",
+              "audioBitrateKbps": 384,
+              "bitrateKbps": 69603,
+              "canCopy": false,
+              "color": "preserve",
+              "durationMs": 10000,
+              "estimatedSizeBytes": 90189892.58164516,
+              "fps": 59.94005994005994,
+              "height": 2160,
+              "mime": "video/avc",
+              "timing": "preserve",
+              "width": 3840
+            }
+          },
+          {
+            "checksum": 30689370029.856236,
+            "elapsedMs": 17.791416,
+            "iterations": 500000,
+            "name": "hdr-preserve-4k",
+            "nsPerOperation": 35.582832,
+            "output": {
+              "audio": "preserve",
+              "audioBitrateKbps": 384,
+              "bitrateKbps": 45242,
+              "canCopy": true,
+              "color": "preserve",
+              "durationMs": 10000,
+              "estimatedSizeBytes": 58796626.05435803,
+              "fps": 59.94005994005994,
+              "height": 2160,
+              "mime": "video/hevc",
+              "timing": "preserve",
+              "width": 3840
+            }
+          },
+          {
+            "checksum": 28050400000,
+            "elapsedMs": 20.467666,
+            "iterations": 500000,
+            "name": "constant-24fps",
+            "nsPerOperation": 40.935332,
+            "output": {
+              "audio": "preserve",
+              "audioBitrateKbps": 384,
+              "bitrateKbps": 40000,
+              "canCopy": false,
+              "color": "preserve",
+              "durationMs": 10000,
+              "estimatedSizeBytes": 52041237.11340206,
+              "fps": 24,
+              "height": 2160,
+              "mime": "video/avc",
+              "timing": "constant",
+              "width": 3840
+            }
+          }
+        ],
+        "processPeakResidentBytes": 6324224
+      },
+      {
+        "measurements": [
+          {
+            "checksum": 42869870030.228004,
+            "elapsedMs": 19.609292,
+            "iterations": 500000,
+            "name": "preserve-4k",
+            "nsPerOperation": 39.218584,
+            "output": {
+              "audio": "preserve",
+              "audioBitrateKbps": 384,
+              "bitrateKbps": 69603,
+              "canCopy": true,
+              "color": "preserve",
+              "durationMs": 10000,
+              "estimatedSizeBytes": 90189892.58164516,
+              "fps": 59.94005994005994,
+              "height": 2160,
+              "mime": "video/avc",
+              "timing": "preserve",
+              "width": 3840
+            }
+          },
+          {
+            "checksum": 9178200000,
+            "elapsedMs": 19.065667,
+            "iterations": 500000,
+            "name": "balanced-4k",
+            "nsPerOperation": 38.131334,
+            "output": {
+              "audio": "preserve",
+              "audioBitrateKbps": 384,
+              "bitrateKbps": 5288,
+              "canCopy": false,
+              "color": "preserve",
+              "durationMs": 10000,
+              "estimatedSizeBytes": 7308865.979381444,
+              "fps": 30,
+              "height": 1080,
+              "mime": "video/avc",
+              "timing": "cap",
+              "width": 1920
+            }
+          },
+          {
+            "checksum": 6743800000,
+            "elapsedMs": 19.400708,
+            "iterations": 500000,
+            "name": "small-4k",
+            "nsPerOperation": 38.801416,
+            "output": {
+              "audio": "preserve",
+              "audioBitrateKbps": 384,
+              "bitrateKbps": 1438,
+              "canCopy": false,
+              "color": "preserve",
+              "durationMs": 10000,
+              "estimatedSizeBytes": 2347546.3917525774,
+              "fps": 24,
+              "height": 720,
+              "mime": "video/avc",
+              "timing": "cap",
+              "width": 1280
+            }
+          },
+          {
+            "checksum": 9256370029.915058,
+            "elapsedMs": 20.894708,
+            "iterations": 500000,
+            "name": "target-size-trim",
+            "nsPerOperation": 41.789416,
+            "output": {
+              "audio": "preserve",
+              "audioBitrateKbps": 384,
+              "bitrateKbps": 7376,
+              "canCopy": false,
+              "color": "preserve",
+              "durationMs": 5000,
+              "estimatedSizeBytes": 5000000,
+              "fps": 59.94005994005994,
+              "height": 2160,
+              "mime": "video/avc",
+              "timing": "preserve",
+              "width": 3840
+            }
+          },
+          {
+            "checksum": 42869870030.228004,
+            "elapsedMs": 18.949208,
+            "iterations": 500000,
+            "name": "watermark-4k",
+            "nsPerOperation": 37.898416,
+            "output": {
+              "audio": "preserve",
+              "audioBitrateKbps": 384,
+              "bitrateKbps": 69603,
+              "canCopy": false,
+              "color": "preserve",
+              "durationMs": 10000,
+              "estimatedSizeBytes": 90189892.58164516,
+              "fps": 59.94005994005994,
+              "height": 2160,
+              "mime": "video/avc",
+              "timing": "preserve",
+              "width": 3840
+            }
+          },
+          {
+            "checksum": 30689370029.856236,
+            "elapsedMs": 17.70325,
+            "iterations": 500000,
+            "name": "hdr-preserve-4k",
+            "nsPerOperation": 35.4065,
+            "output": {
+              "audio": "preserve",
+              "audioBitrateKbps": 384,
+              "bitrateKbps": 45242,
+              "canCopy": true,
+              "color": "preserve",
+              "durationMs": 10000,
+              "estimatedSizeBytes": 58796626.05435803,
+              "fps": 59.94005994005994,
+              "height": 2160,
+              "mime": "video/hevc",
+              "timing": "preserve",
+              "width": 3840
+            }
+          },
+          {
+            "checksum": 28050400000,
+            "elapsedMs": 20.352959,
+            "iterations": 500000,
+            "name": "constant-24fps",
+            "nsPerOperation": 40.705918,
+            "output": {
+              "audio": "preserve",
+              "audioBitrateKbps": 384,
+              "bitrateKbps": 40000,
+              "canCopy": false,
+              "color": "preserve",
+              "durationMs": 10000,
+              "estimatedSizeBytes": 52041237.11340206,
+              "fps": 24,
+              "height": 2160,
+              "mime": "video/avc",
+              "timing": "constant",
+              "width": 3840
+            }
+          }
+        ],
+        "processPeakResidentBytes": 6324224
+      },
+      {
+        "measurements": [
+          {
+            "checksum": 42869870030.228004,
+            "elapsedMs": 19.684625,
+            "iterations": 500000,
+            "name": "preserve-4k",
+            "nsPerOperation": 39.36925,
+            "output": {
+              "audio": "preserve",
+              "audioBitrateKbps": 384,
+              "bitrateKbps": 69603,
+              "canCopy": true,
+              "color": "preserve",
+              "durationMs": 10000,
+              "estimatedSizeBytes": 90189892.58164516,
+              "fps": 59.94005994005994,
+              "height": 2160,
+              "mime": "video/avc",
+              "timing": "preserve",
+              "width": 3840
+            }
+          },
+          {
+            "checksum": 9178200000,
+            "elapsedMs": 18.993417,
+            "iterations": 500000,
+            "name": "balanced-4k",
+            "nsPerOperation": 37.986834,
+            "output": {
+              "audio": "preserve",
+              "audioBitrateKbps": 384,
+              "bitrateKbps": 5288,
+              "canCopy": false,
+              "color": "preserve",
+              "durationMs": 10000,
+              "estimatedSizeBytes": 7308865.979381444,
+              "fps": 30,
+              "height": 1080,
+              "mime": "video/avc",
+              "timing": "cap",
+              "width": 1920
+            }
+          },
+          {
+            "checksum": 6743800000,
+            "elapsedMs": 19.197792,
+            "iterations": 500000,
+            "name": "small-4k",
+            "nsPerOperation": 38.395584,
+            "output": {
+              "audio": "preserve",
+              "audioBitrateKbps": 384,
+              "bitrateKbps": 1438,
+              "canCopy": false,
+              "color": "preserve",
+              "durationMs": 10000,
+              "estimatedSizeBytes": 2347546.3917525774,
+              "fps": 24,
+              "height": 720,
+              "mime": "video/avc",
+              "timing": "cap",
+              "width": 1280
+            }
+          },
+          {
+            "checksum": 9256370029.915058,
+            "elapsedMs": 20.936125,
+            "iterations": 500000,
+            "name": "target-size-trim",
+            "nsPerOperation": 41.87225,
+            "output": {
+              "audio": "preserve",
+              "audioBitrateKbps": 384,
+              "bitrateKbps": 7376,
+              "canCopy": false,
+              "color": "preserve",
+              "durationMs": 5000,
+              "estimatedSizeBytes": 5000000,
+              "fps": 59.94005994005994,
+              "height": 2160,
+              "mime": "video/avc",
+              "timing": "preserve",
+              "width": 3840
+            }
+          },
+          {
+            "checksum": 42869870030.228004,
+            "elapsedMs": 18.619708,
+            "iterations": 500000,
+            "name": "watermark-4k",
+            "nsPerOperation": 37.239416,
+            "output": {
+              "audio": "preserve",
+              "audioBitrateKbps": 384,
+              "bitrateKbps": 69603,
+              "canCopy": false,
+              "color": "preserve",
+              "durationMs": 10000,
+              "estimatedSizeBytes": 90189892.58164516,
+              "fps": 59.94005994005994,
+              "height": 2160,
+              "mime": "video/avc",
+              "timing": "preserve",
+              "width": 3840
+            }
+          },
+          {
+            "checksum": 30689370029.856236,
+            "elapsedMs": 17.730542,
+            "iterations": 500000,
+            "name": "hdr-preserve-4k",
+            "nsPerOperation": 35.461084,
+            "output": {
+              "audio": "preserve",
+              "audioBitrateKbps": 384,
+              "bitrateKbps": 45242,
+              "canCopy": true,
+              "color": "preserve",
+              "durationMs": 10000,
+              "estimatedSizeBytes": 58796626.05435803,
+              "fps": 59.94005994005994,
+              "height": 2160,
+              "mime": "video/hevc",
+              "timing": "preserve",
+              "width": 3840
+            }
+          },
+          {
+            "checksum": 28050400000,
+            "elapsedMs": 20.358292,
+            "iterations": 500000,
+            "name": "constant-24fps",
+            "nsPerOperation": 40.716584,
+            "output": {
+              "audio": "preserve",
+              "audioBitrateKbps": 384,
+              "bitrateKbps": 40000,
+              "canCopy": false,
+              "color": "preserve",
+              "durationMs": 10000,
+              "estimatedSizeBytes": 52041237.11340206,
+              "fps": 24,
+              "height": 2160,
+              "mime": "video/avc",
+              "timing": "constant",
+              "width": 3840
+            }
+          }
+        ],
+        "processPeakResidentBytes": 6324224
+      },
+      {
+        "measurements": [
+          {
+            "checksum": 42869870030.228004,
+            "elapsedMs": 19.592833,
+            "iterations": 500000,
+            "name": "preserve-4k",
+            "nsPerOperation": 39.185666,
+            "output": {
+              "audio": "preserve",
+              "audioBitrateKbps": 384,
+              "bitrateKbps": 69603,
+              "canCopy": true,
+              "color": "preserve",
+              "durationMs": 10000,
+              "estimatedSizeBytes": 90189892.58164516,
+              "fps": 59.94005994005994,
+              "height": 2160,
+              "mime": "video/avc",
+              "timing": "preserve",
+              "width": 3840
+            }
+          },
+          {
+            "checksum": 9178200000,
+            "elapsedMs": 18.891625,
+            "iterations": 500000,
+            "name": "balanced-4k",
+            "nsPerOperation": 37.78325,
+            "output": {
+              "audio": "preserve",
+              "audioBitrateKbps": 384,
+              "bitrateKbps": 5288,
+              "canCopy": false,
+              "color": "preserve",
+              "durationMs": 10000,
+              "estimatedSizeBytes": 7308865.979381444,
+              "fps": 30,
+              "height": 1080,
+              "mime": "video/avc",
+              "timing": "cap",
+              "width": 1920
+            }
+          },
+          {
+            "checksum": 6743800000,
+            "elapsedMs": 19.136459,
+            "iterations": 500000,
+            "name": "small-4k",
+            "nsPerOperation": 38.272918,
+            "output": {
+              "audio": "preserve",
+              "audioBitrateKbps": 384,
+              "bitrateKbps": 1438,
+              "canCopy": false,
+              "color": "preserve",
+              "durationMs": 10000,
+              "estimatedSizeBytes": 2347546.3917525774,
+              "fps": 24,
+              "height": 720,
+              "mime": "video/avc",
+              "timing": "cap",
+              "width": 1280
+            }
+          },
+          {
+            "checksum": 9256370029.915058,
+            "elapsedMs": 21.09,
+            "iterations": 500000,
+            "name": "target-size-trim",
+            "nsPerOperation": 42.18,
+            "output": {
+              "audio": "preserve",
+              "audioBitrateKbps": 384,
+              "bitrateKbps": 7376,
+              "canCopy": false,
+              "color": "preserve",
+              "durationMs": 5000,
+              "estimatedSizeBytes": 5000000,
+              "fps": 59.94005994005994,
+              "height": 2160,
+              "mime": "video/avc",
+              "timing": "preserve",
+              "width": 3840
+            }
+          },
+          {
+            "checksum": 42869870030.228004,
+            "elapsedMs": 18.955333,
+            "iterations": 500000,
+            "name": "watermark-4k",
+            "nsPerOperation": 37.910666,
+            "output": {
+              "audio": "preserve",
+              "audioBitrateKbps": 384,
+              "bitrateKbps": 69603,
+              "canCopy": false,
+              "color": "preserve",
+              "durationMs": 10000,
+              "estimatedSizeBytes": 90189892.58164516,
+              "fps": 59.94005994005994,
+              "height": 2160,
+              "mime": "video/avc",
+              "timing": "preserve",
+              "width": 3840
+            }
+          },
+          {
+            "checksum": 30689370029.856236,
+            "elapsedMs": 17.731375,
+            "iterations": 500000,
+            "name": "hdr-preserve-4k",
+            "nsPerOperation": 35.46275,
+            "output": {
+              "audio": "preserve",
+              "audioBitrateKbps": 384,
+              "bitrateKbps": 45242,
+              "canCopy": true,
+              "color": "preserve",
+              "durationMs": 10000,
+              "estimatedSizeBytes": 58796626.05435803,
+              "fps": 59.94005994005994,
+              "height": 2160,
+              "mime": "video/hevc",
+              "timing": "preserve",
+              "width": 3840
+            }
+          },
+          {
+            "checksum": 28050400000,
+            "elapsedMs": 20.428959,
+            "iterations": 500000,
+            "name": "constant-24fps",
+            "nsPerOperation": 40.857918,
+            "output": {
+              "audio": "preserve",
+              "audioBitrateKbps": 384,
+              "bitrateKbps": 40000,
+              "canCopy": false,
+              "color": "preserve",
+              "durationMs": 10000,
+              "estimatedSizeBytes": 52041237.11340206,
+              "fps": 24,
+              "height": 2160,
+              "mime": "video/avc",
+              "timing": "constant",
+              "width": 3840
+            }
+          }
+        ],
+        "processPeakResidentBytes": 6324224
+      },
+      {
+        "measurements": [
+          {
+            "checksum": 42869870030.228004,
+            "elapsedMs": 19.6865,
+            "iterations": 500000,
+            "name": "preserve-4k",
+            "nsPerOperation": 39.373,
+            "output": {
+              "audio": "preserve",
+              "audioBitrateKbps": 384,
+              "bitrateKbps": 69603,
+              "canCopy": true,
+              "color": "preserve",
+              "durationMs": 10000,
+              "estimatedSizeBytes": 90189892.58164516,
+              "fps": 59.94005994005994,
+              "height": 2160,
+              "mime": "video/avc",
+              "timing": "preserve",
+              "width": 3840
+            }
+          },
+          {
+            "checksum": 9178200000,
+            "elapsedMs": 19.054875,
+            "iterations": 500000,
+            "name": "balanced-4k",
+            "nsPerOperation": 38.10975,
+            "output": {
+              "audio": "preserve",
+              "audioBitrateKbps": 384,
+              "bitrateKbps": 5288,
+              "canCopy": false,
+              "color": "preserve",
+              "durationMs": 10000,
+              "estimatedSizeBytes": 7308865.979381444,
+              "fps": 30,
+              "height": 1080,
+              "mime": "video/avc",
+              "timing": "cap",
+              "width": 1920
+            }
+          },
+          {
+            "checksum": 6743800000,
+            "elapsedMs": 19.188291,
+            "iterations": 500000,
+            "name": "small-4k",
+            "nsPerOperation": 38.376582,
+            "output": {
+              "audio": "preserve",
+              "audioBitrateKbps": 384,
+              "bitrateKbps": 1438,
+              "canCopy": false,
+              "color": "preserve",
+              "durationMs": 10000,
+              "estimatedSizeBytes": 2347546.3917525774,
+              "fps": 24,
+              "height": 720,
+              "mime": "video/avc",
+              "timing": "cap",
+              "width": 1280
+            }
+          },
+          {
+            "checksum": 9256370029.915058,
+            "elapsedMs": 20.906875,
+            "iterations": 500000,
+            "name": "target-size-trim",
+            "nsPerOperation": 41.81375,
+            "output": {
+              "audio": "preserve",
+              "audioBitrateKbps": 384,
+              "bitrateKbps": 7376,
+              "canCopy": false,
+              "color": "preserve",
+              "durationMs": 5000,
+              "estimatedSizeBytes": 5000000,
+              "fps": 59.94005994005994,
+              "height": 2160,
+              "mime": "video/avc",
+              "timing": "preserve",
+              "width": 3840
+            }
+          },
+          {
+            "checksum": 42869870030.228004,
+            "elapsedMs": 18.934541,
+            "iterations": 500000,
+            "name": "watermark-4k",
+            "nsPerOperation": 37.869082,
+            "output": {
+              "audio": "preserve",
+              "audioBitrateKbps": 384,
+              "bitrateKbps": 69603,
+              "canCopy": false,
+              "color": "preserve",
+              "durationMs": 10000,
+              "estimatedSizeBytes": 90189892.58164516,
+              "fps": 59.94005994005994,
+              "height": 2160,
+              "mime": "video/avc",
+              "timing": "preserve",
+              "width": 3840
+            }
+          },
+          {
+            "checksum": 30689370029.856236,
+            "elapsedMs": 17.71525,
+            "iterations": 500000,
+            "name": "hdr-preserve-4k",
+            "nsPerOperation": 35.4305,
+            "output": {
+              "audio": "preserve",
+              "audioBitrateKbps": 384,
+              "bitrateKbps": 45242,
+              "canCopy": true,
+              "color": "preserve",
+              "durationMs": 10000,
+              "estimatedSizeBytes": 58796626.05435803,
+              "fps": 59.94005994005994,
+              "height": 2160,
+              "mime": "video/hevc",
+              "timing": "preserve",
+              "width": 3840
+            }
+          },
+          {
+            "checksum": 28050400000,
+            "elapsedMs": 20.361208,
+            "iterations": 500000,
+            "name": "constant-24fps",
+            "nsPerOperation": 40.722416,
+            "output": {
+              "audio": "preserve",
+              "audioBitrateKbps": 384,
+              "bitrateKbps": 40000,
+              "canCopy": false,
+              "color": "preserve",
+              "durationMs": 10000,
+              "estimatedSizeBytes": 52041237.11340206,
+              "fps": 24,
+              "height": 2160,
+              "mime": "video/avc",
+              "timing": "constant",
+              "width": 3840
+            }
+          }
+        ],
+        "processPeakResidentBytes": 6324224
+      },
+      {
+        "measurements": [
+          {
+            "checksum": 42869870030.228004,
+            "elapsedMs": 19.632291,
+            "iterations": 500000,
+            "name": "preserve-4k",
+            "nsPerOperation": 39.264582,
+            "output": {
+              "audio": "preserve",
+              "audioBitrateKbps": 384,
+              "bitrateKbps": 69603,
+              "canCopy": true,
+              "color": "preserve",
+              "durationMs": 10000,
+              "estimatedSizeBytes": 90189892.58164516,
+              "fps": 59.94005994005994,
+              "height": 2160,
+              "mime": "video/avc",
+              "timing": "preserve",
+              "width": 3840
+            }
+          },
+          {
+            "checksum": 9178200000,
+            "elapsedMs": 19.002041,
+            "iterations": 500000,
+            "name": "balanced-4k",
+            "nsPerOperation": 38.004082,
+            "output": {
+              "audio": "preserve",
+              "audioBitrateKbps": 384,
+              "bitrateKbps": 5288,
+              "canCopy": false,
+              "color": "preserve",
+              "durationMs": 10000,
+              "estimatedSizeBytes": 7308865.979381444,
+              "fps": 30,
+              "height": 1080,
+              "mime": "video/avc",
+              "timing": "cap",
+              "width": 1920
+            }
+          },
+          {
+            "checksum": 6743800000,
+            "elapsedMs": 19.194958,
+            "iterations": 500000,
+            "name": "small-4k",
+            "nsPerOperation": 38.389916,
+            "output": {
+              "audio": "preserve",
+              "audioBitrateKbps": 384,
+              "bitrateKbps": 1438,
+              "canCopy": false,
+              "color": "preserve",
+              "durationMs": 10000,
+              "estimatedSizeBytes": 2347546.3917525774,
+              "fps": 24,
+              "height": 720,
+              "mime": "video/avc",
+              "timing": "cap",
+              "width": 1280
+            }
+          },
+          {
+            "checksum": 9256370029.915058,
+            "elapsedMs": 20.9205,
+            "iterations": 500000,
+            "name": "target-size-trim",
+            "nsPerOperation": 41.841,
+            "output": {
+              "audio": "preserve",
+              "audioBitrateKbps": 384,
+              "bitrateKbps": 7376,
+              "canCopy": false,
+              "color": "preserve",
+              "durationMs": 5000,
+              "estimatedSizeBytes": 5000000,
+              "fps": 59.94005994005994,
+              "height": 2160,
+              "mime": "video/avc",
+              "timing": "preserve",
+              "width": 3840
+            }
+          },
+          {
+            "checksum": 42869870030.228004,
+            "elapsedMs": 18.855792,
+            "iterations": 500000,
+            "name": "watermark-4k",
+            "nsPerOperation": 37.711584,
+            "output": {
+              "audio": "preserve",
+              "audioBitrateKbps": 384,
+              "bitrateKbps": 69603,
+              "canCopy": false,
+              "color": "preserve",
+              "durationMs": 10000,
+              "estimatedSizeBytes": 90189892.58164516,
+              "fps": 59.94005994005994,
+              "height": 2160,
+              "mime": "video/avc",
+              "timing": "preserve",
+              "width": 3840
+            }
+          },
+          {
+            "checksum": 30689370029.856236,
+            "elapsedMs": 17.743208,
+            "iterations": 500000,
+            "name": "hdr-preserve-4k",
+            "nsPerOperation": 35.486416,
+            "output": {
+              "audio": "preserve",
+              "audioBitrateKbps": 384,
+              "bitrateKbps": 45242,
+              "canCopy": true,
+              "color": "preserve",
+              "durationMs": 10000,
+              "estimatedSizeBytes": 58796626.05435803,
+              "fps": 59.94005994005994,
+              "height": 2160,
+              "mime": "video/hevc",
+              "timing": "preserve",
+              "width": 3840
+            }
+          },
+          {
+            "checksum": 28050400000,
+            "elapsedMs": 20.423,
+            "iterations": 500000,
+            "name": "constant-24fps",
+            "nsPerOperation": 40.846,
+            "output": {
+              "audio": "preserve",
+              "audioBitrateKbps": 384,
+              "bitrateKbps": 40000,
+              "canCopy": false,
+              "color": "preserve",
+              "durationMs": 10000,
+              "estimatedSizeBytes": 52041237.11340206,
+              "fps": 24,
+              "height": 2160,
+              "mime": "video/avc",
+              "timing": "constant",
+              "width": 3840
+            }
+          }
+        ],
+        "processPeakResidentBytes": 6324224
+      },
+      {
+        "measurements": [
+          {
+            "checksum": 42869870030.228004,
+            "elapsedMs": 19.61975,
+            "iterations": 500000,
+            "name": "preserve-4k",
+            "nsPerOperation": 39.2395,
+            "output": {
+              "audio": "preserve",
+              "audioBitrateKbps": 384,
+              "bitrateKbps": 69603,
+              "canCopy": true,
+              "color": "preserve",
+              "durationMs": 10000,
+              "estimatedSizeBytes": 90189892.58164516,
+              "fps": 59.94005994005994,
+              "height": 2160,
+              "mime": "video/avc",
+              "timing": "preserve",
+              "width": 3840
+            }
+          },
+          {
+            "checksum": 9178200000,
+            "elapsedMs": 19.00925,
+            "iterations": 500000,
+            "name": "balanced-4k",
+            "nsPerOperation": 38.0185,
+            "output": {
+              "audio": "preserve",
+              "audioBitrateKbps": 384,
+              "bitrateKbps": 5288,
+              "canCopy": false,
+              "color": "preserve",
+              "durationMs": 10000,
+              "estimatedSizeBytes": 7308865.979381444,
+              "fps": 30,
+              "height": 1080,
+              "mime": "video/avc",
+              "timing": "cap",
+              "width": 1920
+            }
+          },
+          {
+            "checksum": 6743800000,
+            "elapsedMs": 19.27325,
+            "iterations": 500000,
+            "name": "small-4k",
+            "nsPerOperation": 38.5465,
+            "output": {
+              "audio": "preserve",
+              "audioBitrateKbps": 384,
+              "bitrateKbps": 1438,
+              "canCopy": false,
+              "color": "preserve",
+              "durationMs": 10000,
+              "estimatedSizeBytes": 2347546.3917525774,
+              "fps": 24,
+              "height": 720,
+              "mime": "video/avc",
+              "timing": "cap",
+              "width": 1280
+            }
+          },
+          {
+            "checksum": 9256370029.915058,
+            "elapsedMs": 20.973666,
+            "iterations": 500000,
+            "name": "target-size-trim",
+            "nsPerOperation": 41.947332,
+            "output": {
+              "audio": "preserve",
+              "audioBitrateKbps": 384,
+              "bitrateKbps": 7376,
+              "canCopy": false,
+              "color": "preserve",
+              "durationMs": 5000,
+              "estimatedSizeBytes": 5000000,
+              "fps": 59.94005994005994,
+              "height": 2160,
+              "mime": "video/avc",
+              "timing": "preserve",
+              "width": 3840
+            }
+          },
+          {
+            "checksum": 42869870030.228004,
+            "elapsedMs": 18.951375,
+            "iterations": 500000,
+            "name": "watermark-4k",
+            "nsPerOperation": 37.90275,
+            "output": {
+              "audio": "preserve",
+              "audioBitrateKbps": 384,
+              "bitrateKbps": 69603,
+              "canCopy": false,
+              "color": "preserve",
+              "durationMs": 10000,
+              "estimatedSizeBytes": 90189892.58164516,
+              "fps": 59.94005994005994,
+              "height": 2160,
+              "mime": "video/avc",
+              "timing": "preserve",
+              "width": 3840
+            }
+          },
+          {
+            "checksum": 30689370029.856236,
+            "elapsedMs": 17.720666,
+            "iterations": 500000,
+            "name": "hdr-preserve-4k",
+            "nsPerOperation": 35.441332,
+            "output": {
+              "audio": "preserve",
+              "audioBitrateKbps": 384,
+              "bitrateKbps": 45242,
+              "canCopy": true,
+              "color": "preserve",
+              "durationMs": 10000,
+              "estimatedSizeBytes": 58796626.05435803,
+              "fps": 59.94005994005994,
+              "height": 2160,
+              "mime": "video/hevc",
+              "timing": "preserve",
+              "width": 3840
+            }
+          },
+          {
+            "checksum": 28050400000,
+            "elapsedMs": 20.473,
+            "iterations": 500000,
+            "name": "constant-24fps",
+            "nsPerOperation": 40.946,
+            "output": {
+              "audio": "preserve",
+              "audioBitrateKbps": 384,
+              "bitrateKbps": 40000,
+              "canCopy": false,
+              "color": "preserve",
+              "durationMs": 10000,
+              "estimatedSizeBytes": 52041237.11340206,
+              "fps": 24,
+              "height": 2160,
+              "mime": "video/avc",
+              "timing": "constant",
+              "width": 3840
+            }
+          }
+        ],
+        "processPeakResidentBytes": 6324224
+      }
+    ],
+    "after": [
+      {
+        "measurements": [
+          {
+            "checksum": 42869870030.228004,
+            "elapsedMs": 65.551583,
+            "iterations": 500000,
+            "name": "preserve-4k",
+            "nsPerOperation": 131.103166,
+            "output": {
+              "audio": "preserve",
+              "audioBitrateKbps": 384,
+              "bitrateKbps": 69603,
+              "canCopy": true,
+              "color": "preserve",
+              "durationMs": 10000,
+              "estimatedSizeBytes": 90189892.58164516,
+              "fps": 59.94005994005994,
+              "height": 2160,
+              "mime": "video/avc",
+              "timing": "preserve",
+              "width": 3840
+            }
+          },
+          {
+            "checksum": 9178200000,
+            "elapsedMs": 64.49725,
+            "iterations": 500000,
+            "name": "balanced-4k",
+            "nsPerOperation": 128.9945,
+            "output": {
+              "audio": "preserve",
+              "audioBitrateKbps": 384,
+              "bitrateKbps": 5288,
+              "canCopy": false,
+              "color": "preserve",
+              "durationMs": 10000,
+              "estimatedSizeBytes": 7308865.979381444,
+              "fps": 30,
+              "height": 1080,
+              "mime": "video/avc",
+              "timing": "cap",
+              "width": 1920
+            }
+          },
+          {
+            "checksum": 6743800000,
+            "elapsedMs": 67.776,
+            "iterations": 500000,
+            "name": "small-4k",
+            "nsPerOperation": 135.552,
+            "output": {
+              "audio": "preserve",
+              "audioBitrateKbps": 384,
+              "bitrateKbps": 1438,
+              "canCopy": false,
+              "color": "preserve",
+              "durationMs": 10000,
+              "estimatedSizeBytes": 2347546.3917525774,
+              "fps": 24,
+              "height": 720,
+              "mime": "video/avc",
+              "timing": "cap",
+              "width": 1280
+            }
+          },
+          {
+            "checksum": 9256370029.915058,
+            "elapsedMs": 68.975875,
+            "iterations": 500000,
+            "name": "target-size-trim",
+            "nsPerOperation": 137.95175,
+            "output": {
+              "audio": "preserve",
+              "audioBitrateKbps": 384,
+              "bitrateKbps": 7376,
+              "canCopy": false,
+              "color": "preserve",
+              "durationMs": 5000,
+              "estimatedSizeBytes": 5000000,
+              "fps": 59.94005994005994,
+              "height": 2160,
+              "mime": "video/avc",
+              "timing": "preserve",
+              "width": 3840
+            }
+          },
+          {
+            "checksum": 42869870030.228004,
+            "elapsedMs": 155.652792,
+            "iterations": 500000,
+            "name": "watermark-4k",
+            "nsPerOperation": 311.305584,
+            "output": {
+              "audio": "preserve",
+              "audioBitrateKbps": 384,
+              "bitrateKbps": 69603,
+              "canCopy": false,
+              "color": "preserve",
+              "durationMs": 10000,
+              "estimatedSizeBytes": 90189892.58164516,
+              "fps": 59.94005994005994,
+              "height": 2160,
+              "mime": "video/avc",
+              "timing": "preserve",
+              "width": 3840
+            }
+          },
+          {
+            "checksum": 30689370029.856236,
+            "elapsedMs": 60.982375,
+            "iterations": 500000,
+            "name": "hdr-preserve-4k",
+            "nsPerOperation": 121.96475,
+            "output": {
+              "audio": "preserve",
+              "audioBitrateKbps": 384,
+              "bitrateKbps": 45242,
+              "canCopy": true,
+              "color": "preserve",
+              "durationMs": 10000,
+              "estimatedSizeBytes": 58796626.05435803,
+              "fps": 59.94005994005994,
+              "height": 2160,
+              "mime": "video/hevc",
+              "timing": "preserve",
+              "width": 3840
+            }
+          },
+          {
+            "checksum": 28050400000,
+            "elapsedMs": 66.8235,
+            "iterations": 500000,
+            "name": "constant-24fps",
+            "nsPerOperation": 133.647,
+            "output": {
+              "audio": "preserve",
+              "audioBitrateKbps": 384,
+              "bitrateKbps": 40000,
+              "canCopy": false,
+              "color": "preserve",
+              "durationMs": 10000,
+              "estimatedSizeBytes": 52041237.11340206,
+              "fps": 24,
+              "height": 2160,
+              "mime": "video/avc",
+              "timing": "constant",
+              "width": 3840
+            }
+          }
+        ],
+        "processPeakResidentBytes": 6389760
+      },
+      {
+        "measurements": [
+          {
+            "checksum": 42869870030.228004,
+            "elapsedMs": 65.489916,
+            "iterations": 500000,
+            "name": "preserve-4k",
+            "nsPerOperation": 130.979832,
+            "output": {
+              "audio": "preserve",
+              "audioBitrateKbps": 384,
+              "bitrateKbps": 69603,
+              "canCopy": true,
+              "color": "preserve",
+              "durationMs": 10000,
+              "estimatedSizeBytes": 90189892.58164516,
+              "fps": 59.94005994005994,
+              "height": 2160,
+              "mime": "video/avc",
+              "timing": "preserve",
+              "width": 3840
+            }
+          },
+          {
+            "checksum": 9178200000,
+            "elapsedMs": 64.310042,
+            "iterations": 500000,
+            "name": "balanced-4k",
+            "nsPerOperation": 128.620084,
+            "output": {
+              "audio": "preserve",
+              "audioBitrateKbps": 384,
+              "bitrateKbps": 5288,
+              "canCopy": false,
+              "color": "preserve",
+              "durationMs": 10000,
+              "estimatedSizeBytes": 7308865.979381444,
+              "fps": 30,
+              "height": 1080,
+              "mime": "video/avc",
+              "timing": "cap",
+              "width": 1920
+            }
+          },
+          {
+            "checksum": 6743800000,
+            "elapsedMs": 64.377333,
+            "iterations": 500000,
+            "name": "small-4k",
+            "nsPerOperation": 128.754666,
+            "output": {
+              "audio": "preserve",
+              "audioBitrateKbps": 384,
+              "bitrateKbps": 1438,
+              "canCopy": false,
+              "color": "preserve",
+              "durationMs": 10000,
+              "estimatedSizeBytes": 2347546.3917525774,
+              "fps": 24,
+              "height": 720,
+              "mime": "video/avc",
+              "timing": "cap",
+              "width": 1280
+            }
+          },
+          {
+            "checksum": 9256370029.915058,
+            "elapsedMs": 66.174125,
+            "iterations": 500000,
+            "name": "target-size-trim",
+            "nsPerOperation": 132.34825,
+            "output": {
+              "audio": "preserve",
+              "audioBitrateKbps": 384,
+              "bitrateKbps": 7376,
+              "canCopy": false,
+              "color": "preserve",
+              "durationMs": 5000,
+              "estimatedSizeBytes": 5000000,
+              "fps": 59.94005994005994,
+              "height": 2160,
+              "mime": "video/avc",
+              "timing": "preserve",
+              "width": 3840
+            }
+          },
+          {
+            "checksum": 42869870030.228004,
+            "elapsedMs": 155.650167,
+            "iterations": 500000,
+            "name": "watermark-4k",
+            "nsPerOperation": 311.300334,
+            "output": {
+              "audio": "preserve",
+              "audioBitrateKbps": 384,
+              "bitrateKbps": 69603,
+              "canCopy": false,
+              "color": "preserve",
+              "durationMs": 10000,
+              "estimatedSizeBytes": 90189892.58164516,
+              "fps": 59.94005994005994,
+              "height": 2160,
+              "mime": "video/avc",
+              "timing": "preserve",
+              "width": 3840
+            }
+          },
+          {
+            "checksum": 30689370029.856236,
+            "elapsedMs": 60.986458,
+            "iterations": 500000,
+            "name": "hdr-preserve-4k",
+            "nsPerOperation": 121.972916,
+            "output": {
+              "audio": "preserve",
+              "audioBitrateKbps": 384,
+              "bitrateKbps": 45242,
+              "canCopy": true,
+              "color": "preserve",
+              "durationMs": 10000,
+              "estimatedSizeBytes": 58796626.05435803,
+              "fps": 59.94005994005994,
+              "height": 2160,
+              "mime": "video/hevc",
+              "timing": "preserve",
+              "width": 3840
+            }
+          },
+          {
+            "checksum": 28050400000,
+            "elapsedMs": 66.538333,
+            "iterations": 500000,
+            "name": "constant-24fps",
+            "nsPerOperation": 133.076666,
+            "output": {
+              "audio": "preserve",
+              "audioBitrateKbps": 384,
+              "bitrateKbps": 40000,
+              "canCopy": false,
+              "color": "preserve",
+              "durationMs": 10000,
+              "estimatedSizeBytes": 52041237.11340206,
+              "fps": 24,
+              "height": 2160,
+              "mime": "video/avc",
+              "timing": "constant",
+              "width": 3840
+            }
+          }
+        ],
+        "processPeakResidentBytes": 6389760
+      },
+      {
+        "measurements": [
+          {
+            "checksum": 42869870030.228004,
+            "elapsedMs": 65.560125,
+            "iterations": 500000,
+            "name": "preserve-4k",
+            "nsPerOperation": 131.12025,
+            "output": {
+              "audio": "preserve",
+              "audioBitrateKbps": 384,
+              "bitrateKbps": 69603,
+              "canCopy": true,
+              "color": "preserve",
+              "durationMs": 10000,
+              "estimatedSizeBytes": 90189892.58164516,
+              "fps": 59.94005994005994,
+              "height": 2160,
+              "mime": "video/avc",
+              "timing": "preserve",
+              "width": 3840
+            }
+          },
+          {
+            "checksum": 9178200000,
+            "elapsedMs": 64.187625,
+            "iterations": 500000,
+            "name": "balanced-4k",
+            "nsPerOperation": 128.37525,
+            "output": {
+              "audio": "preserve",
+              "audioBitrateKbps": 384,
+              "bitrateKbps": 5288,
+              "canCopy": false,
+              "color": "preserve",
+              "durationMs": 10000,
+              "estimatedSizeBytes": 7308865.979381444,
+              "fps": 30,
+              "height": 1080,
+              "mime": "video/avc",
+              "timing": "cap",
+              "width": 1920
+            }
+          },
+          {
+            "checksum": 6743800000,
+            "elapsedMs": 64.2395,
+            "iterations": 500000,
+            "name": "small-4k",
+            "nsPerOperation": 128.479,
+            "output": {
+              "audio": "preserve",
+              "audioBitrateKbps": 384,
+              "bitrateKbps": 1438,
+              "canCopy": false,
+              "color": "preserve",
+              "durationMs": 10000,
+              "estimatedSizeBytes": 2347546.3917525774,
+              "fps": 24,
+              "height": 720,
+              "mime": "video/avc",
+              "timing": "cap",
+              "width": 1280
+            }
+          },
+          {
+            "checksum": 9256370029.915058,
+            "elapsedMs": 68.205167,
+            "iterations": 500000,
+            "name": "target-size-trim",
+            "nsPerOperation": 136.410334,
+            "output": {
+              "audio": "preserve",
+              "audioBitrateKbps": 384,
+              "bitrateKbps": 7376,
+              "canCopy": false,
+              "color": "preserve",
+              "durationMs": 5000,
+              "estimatedSizeBytes": 5000000,
+              "fps": 59.94005994005994,
+              "height": 2160,
+              "mime": "video/avc",
+              "timing": "preserve",
+              "width": 3840
+            }
+          },
+          {
+            "checksum": 42869870030.228004,
+            "elapsedMs": 155.72675,
+            "iterations": 500000,
+            "name": "watermark-4k",
+            "nsPerOperation": 311.4535,
+            "output": {
+              "audio": "preserve",
+              "audioBitrateKbps": 384,
+              "bitrateKbps": 69603,
+              "canCopy": false,
+              "color": "preserve",
+              "durationMs": 10000,
+              "estimatedSizeBytes": 90189892.58164516,
+              "fps": 59.94005994005994,
+              "height": 2160,
+              "mime": "video/avc",
+              "timing": "preserve",
+              "width": 3840
+            }
+          },
+          {
+            "checksum": 30689370029.856236,
+            "elapsedMs": 61.136792,
+            "iterations": 500000,
+            "name": "hdr-preserve-4k",
+            "nsPerOperation": 122.273584,
+            "output": {
+              "audio": "preserve",
+              "audioBitrateKbps": 384,
+              "bitrateKbps": 45242,
+              "canCopy": true,
+              "color": "preserve",
+              "durationMs": 10000,
+              "estimatedSizeBytes": 58796626.05435803,
+              "fps": 59.94005994005994,
+              "height": 2160,
+              "mime": "video/hevc",
+              "timing": "preserve",
+              "width": 3840
+            }
+          },
+          {
+            "checksum": 28050400000,
+            "elapsedMs": 70.198833,
+            "iterations": 500000,
+            "name": "constant-24fps",
+            "nsPerOperation": 140.397666,
+            "output": {
+              "audio": "preserve",
+              "audioBitrateKbps": 384,
+              "bitrateKbps": 40000,
+              "canCopy": false,
+              "color": "preserve",
+              "durationMs": 10000,
+              "estimatedSizeBytes": 52041237.11340206,
+              "fps": 24,
+              "height": 2160,
+              "mime": "video/avc",
+              "timing": "constant",
+              "width": 3840
+            }
+          }
+        ],
+        "processPeakResidentBytes": 6389760
+      },
+      {
+        "measurements": [
+          {
+            "checksum": 42869870030.228004,
+            "elapsedMs": 65.44475,
+            "iterations": 500000,
+            "name": "preserve-4k",
+            "nsPerOperation": 130.8895,
+            "output": {
+              "audio": "preserve",
+              "audioBitrateKbps": 384,
+              "bitrateKbps": 69603,
+              "canCopy": true,
+              "color": "preserve",
+              "durationMs": 10000,
+              "estimatedSizeBytes": 90189892.58164516,
+              "fps": 59.94005994005994,
+              "height": 2160,
+              "mime": "video/avc",
+              "timing": "preserve",
+              "width": 3840
+            }
+          },
+          {
+            "checksum": 9178200000,
+            "elapsedMs": 64.208208,
+            "iterations": 500000,
+            "name": "balanced-4k",
+            "nsPerOperation": 128.416416,
+            "output": {
+              "audio": "preserve",
+              "audioBitrateKbps": 384,
+              "bitrateKbps": 5288,
+              "canCopy": false,
+              "color": "preserve",
+              "durationMs": 10000,
+              "estimatedSizeBytes": 7308865.979381444,
+              "fps": 30,
+              "height": 1080,
+              "mime": "video/avc",
+              "timing": "cap",
+              "width": 1920
+            }
+          },
+          {
+            "checksum": 6743800000,
+            "elapsedMs": 64.498917,
+            "iterations": 500000,
+            "name": "small-4k",
+            "nsPerOperation": 128.997834,
+            "output": {
+              "audio": "preserve",
+              "audioBitrateKbps": 384,
+              "bitrateKbps": 1438,
+              "canCopy": false,
+              "color": "preserve",
+              "durationMs": 10000,
+              "estimatedSizeBytes": 2347546.3917525774,
+              "fps": 24,
+              "height": 720,
+              "mime": "video/avc",
+              "timing": "cap",
+              "width": 1280
+            }
+          },
+          {
+            "checksum": 9256370029.915058,
+            "elapsedMs": 66.10475,
+            "iterations": 500000,
+            "name": "target-size-trim",
+            "nsPerOperation": 132.2095,
+            "output": {
+              "audio": "preserve",
+              "audioBitrateKbps": 384,
+              "bitrateKbps": 7376,
+              "canCopy": false,
+              "color": "preserve",
+              "durationMs": 5000,
+              "estimatedSizeBytes": 5000000,
+              "fps": 59.94005994005994,
+              "height": 2160,
+              "mime": "video/avc",
+              "timing": "preserve",
+              "width": 3840
+            }
+          },
+          {
+            "checksum": 42869870030.228004,
+            "elapsedMs": 156.40275,
+            "iterations": 500000,
+            "name": "watermark-4k",
+            "nsPerOperation": 312.8055,
+            "output": {
+              "audio": "preserve",
+              "audioBitrateKbps": 384,
+              "bitrateKbps": 69603,
+              "canCopy": false,
+              "color": "preserve",
+              "durationMs": 10000,
+              "estimatedSizeBytes": 90189892.58164516,
+              "fps": 59.94005994005994,
+              "height": 2160,
+              "mime": "video/avc",
+              "timing": "preserve",
+              "width": 3840
+            }
+          },
+          {
+            "checksum": 30689370029.856236,
+            "elapsedMs": 60.9495,
+            "iterations": 500000,
+            "name": "hdr-preserve-4k",
+            "nsPerOperation": 121.899,
+            "output": {
+              "audio": "preserve",
+              "audioBitrateKbps": 384,
+              "bitrateKbps": 45242,
+              "canCopy": true,
+              "color": "preserve",
+              "durationMs": 10000,
+              "estimatedSizeBytes": 58796626.05435803,
+              "fps": 59.94005994005994,
+              "height": 2160,
+              "mime": "video/hevc",
+              "timing": "preserve",
+              "width": 3840
+            }
+          },
+          {
+            "checksum": 28050400000,
+            "elapsedMs": 67.050875,
+            "iterations": 500000,
+            "name": "constant-24fps",
+            "nsPerOperation": 134.10175,
+            "output": {
+              "audio": "preserve",
+              "audioBitrateKbps": 384,
+              "bitrateKbps": 40000,
+              "canCopy": false,
+              "color": "preserve",
+              "durationMs": 10000,
+              "estimatedSizeBytes": 52041237.11340206,
+              "fps": 24,
+              "height": 2160,
+              "mime": "video/avc",
+              "timing": "constant",
+              "width": 3840
+            }
+          }
+        ],
+        "processPeakResidentBytes": 6389760
+      },
+      {
+        "measurements": [
+          {
+            "checksum": 42869870030.228004,
+            "elapsedMs": 65.370708,
+            "iterations": 500000,
+            "name": "preserve-4k",
+            "nsPerOperation": 130.741416,
+            "output": {
+              "audio": "preserve",
+              "audioBitrateKbps": 384,
+              "bitrateKbps": 69603,
+              "canCopy": true,
+              "color": "preserve",
+              "durationMs": 10000,
+              "estimatedSizeBytes": 90189892.58164516,
+              "fps": 59.94005994005994,
+              "height": 2160,
+              "mime": "video/avc",
+              "timing": "preserve",
+              "width": 3840
+            }
+          },
+          {
+            "checksum": 9178200000,
+            "elapsedMs": 64.500708,
+            "iterations": 500000,
+            "name": "balanced-4k",
+            "nsPerOperation": 129.001416,
+            "output": {
+              "audio": "preserve",
+              "audioBitrateKbps": 384,
+              "bitrateKbps": 5288,
+              "canCopy": false,
+              "color": "preserve",
+              "durationMs": 10000,
+              "estimatedSizeBytes": 7308865.979381444,
+              "fps": 30,
+              "height": 1080,
+              "mime": "video/avc",
+              "timing": "cap",
+              "width": 1920
+            }
+          },
+          {
+            "checksum": 6743800000,
+            "elapsedMs": 64.398042,
+            "iterations": 500000,
+            "name": "small-4k",
+            "nsPerOperation": 128.796084,
+            "output": {
+              "audio": "preserve",
+              "audioBitrateKbps": 384,
+              "bitrateKbps": 1438,
+              "canCopy": false,
+              "color": "preserve",
+              "durationMs": 10000,
+              "estimatedSizeBytes": 2347546.3917525774,
+              "fps": 24,
+              "height": 720,
+              "mime": "video/avc",
+              "timing": "cap",
+              "width": 1280
+            }
+          },
+          {
+            "checksum": 9256370029.915058,
+            "elapsedMs": 69.015333,
+            "iterations": 500000,
+            "name": "target-size-trim",
+            "nsPerOperation": 138.030666,
+            "output": {
+              "audio": "preserve",
+              "audioBitrateKbps": 384,
+              "bitrateKbps": 7376,
+              "canCopy": false,
+              "color": "preserve",
+              "durationMs": 5000,
+              "estimatedSizeBytes": 5000000,
+              "fps": 59.94005994005994,
+              "height": 2160,
+              "mime": "video/avc",
+              "timing": "preserve",
+              "width": 3840
+            }
+          },
+          {
+            "checksum": 42869870030.228004,
+            "elapsedMs": 157.863708,
+            "iterations": 500000,
+            "name": "watermark-4k",
+            "nsPerOperation": 315.727416,
+            "output": {
+              "audio": "preserve",
+              "audioBitrateKbps": 384,
+              "bitrateKbps": 69603,
+              "canCopy": false,
+              "color": "preserve",
+              "durationMs": 10000,
+              "estimatedSizeBytes": 90189892.58164516,
+              "fps": 59.94005994005994,
+              "height": 2160,
+              "mime": "video/avc",
+              "timing": "preserve",
+              "width": 3840
+            }
+          },
+          {
+            "checksum": 30689370029.856236,
+            "elapsedMs": 60.827,
+            "iterations": 500000,
+            "name": "hdr-preserve-4k",
+            "nsPerOperation": 121.654,
+            "output": {
+              "audio": "preserve",
+              "audioBitrateKbps": 384,
+              "bitrateKbps": 45242,
+              "canCopy": true,
+              "color": "preserve",
+              "durationMs": 10000,
+              "estimatedSizeBytes": 58796626.05435803,
+              "fps": 59.94005994005994,
+              "height": 2160,
+              "mime": "video/hevc",
+              "timing": "preserve",
+              "width": 3840
+            }
+          },
+          {
+            "checksum": 28050400000,
+            "elapsedMs": 69.518125,
+            "iterations": 500000,
+            "name": "constant-24fps",
+            "nsPerOperation": 139.03625,
+            "output": {
+              "audio": "preserve",
+              "audioBitrateKbps": 384,
+              "bitrateKbps": 40000,
+              "canCopy": false,
+              "color": "preserve",
+              "durationMs": 10000,
+              "estimatedSizeBytes": 52041237.11340206,
+              "fps": 24,
+              "height": 2160,
+              "mime": "video/avc",
+              "timing": "constant",
+              "width": 3840
+            }
+          }
+        ],
+        "processPeakResidentBytes": 6389760
+      },
+      {
+        "measurements": [
+          {
+            "checksum": 42869870030.228004,
+            "elapsedMs": 65.438125,
+            "iterations": 500000,
+            "name": "preserve-4k",
+            "nsPerOperation": 130.87625,
+            "output": {
+              "audio": "preserve",
+              "audioBitrateKbps": 384,
+              "bitrateKbps": 69603,
+              "canCopy": true,
+              "color": "preserve",
+              "durationMs": 10000,
+              "estimatedSizeBytes": 90189892.58164516,
+              "fps": 59.94005994005994,
+              "height": 2160,
+              "mime": "video/avc",
+              "timing": "preserve",
+              "width": 3840
+            }
+          },
+          {
+            "checksum": 9178200000,
+            "elapsedMs": 64.387459,
+            "iterations": 500000,
+            "name": "balanced-4k",
+            "nsPerOperation": 128.774918,
+            "output": {
+              "audio": "preserve",
+              "audioBitrateKbps": 384,
+              "bitrateKbps": 5288,
+              "canCopy": false,
+              "color": "preserve",
+              "durationMs": 10000,
+              "estimatedSizeBytes": 7308865.979381444,
+              "fps": 30,
+              "height": 1080,
+              "mime": "video/avc",
+              "timing": "cap",
+              "width": 1920
+            }
+          },
+          {
+            "checksum": 6743800000,
+            "elapsedMs": 64.241375,
+            "iterations": 500000,
+            "name": "small-4k",
+            "nsPerOperation": 128.48275,
+            "output": {
+              "audio": "preserve",
+              "audioBitrateKbps": 384,
+              "bitrateKbps": 1438,
+              "canCopy": false,
+              "color": "preserve",
+              "durationMs": 10000,
+              "estimatedSizeBytes": 2347546.3917525774,
+              "fps": 24,
+              "height": 720,
+              "mime": "video/avc",
+              "timing": "cap",
+              "width": 1280
+            }
+          },
+          {
+            "checksum": 9256370029.915058,
+            "elapsedMs": 65.69075,
+            "iterations": 500000,
+            "name": "target-size-trim",
+            "nsPerOperation": 131.3815,
+            "output": {
+              "audio": "preserve",
+              "audioBitrateKbps": 384,
+              "bitrateKbps": 7376,
+              "canCopy": false,
+              "color": "preserve",
+              "durationMs": 5000,
+              "estimatedSizeBytes": 5000000,
+              "fps": 59.94005994005994,
+              "height": 2160,
+              "mime": "video/avc",
+              "timing": "preserve",
+              "width": 3840
+            }
+          },
+          {
+            "checksum": 42869870030.228004,
+            "elapsedMs": 155.766167,
+            "iterations": 500000,
+            "name": "watermark-4k",
+            "nsPerOperation": 311.532334,
+            "output": {
+              "audio": "preserve",
+              "audioBitrateKbps": 384,
+              "bitrateKbps": 69603,
+              "canCopy": false,
+              "color": "preserve",
+              "durationMs": 10000,
+              "estimatedSizeBytes": 90189892.58164516,
+              "fps": 59.94005994005994,
+              "height": 2160,
+              "mime": "video/avc",
+              "timing": "preserve",
+              "width": 3840
+            }
+          },
+          {
+            "checksum": 30689370029.856236,
+            "elapsedMs": 60.816333,
+            "iterations": 500000,
+            "name": "hdr-preserve-4k",
+            "nsPerOperation": 121.632666,
+            "output": {
+              "audio": "preserve",
+              "audioBitrateKbps": 384,
+              "bitrateKbps": 45242,
+              "canCopy": true,
+              "color": "preserve",
+              "durationMs": 10000,
+              "estimatedSizeBytes": 58796626.05435803,
+              "fps": 59.94005994005994,
+              "height": 2160,
+              "mime": "video/hevc",
+              "timing": "preserve",
+              "width": 3840
+            }
+          },
+          {
+            "checksum": 28050400000,
+            "elapsedMs": 66.908,
+            "iterations": 500000,
+            "name": "constant-24fps",
+            "nsPerOperation": 133.816,
+            "output": {
+              "audio": "preserve",
+              "audioBitrateKbps": 384,
+              "bitrateKbps": 40000,
+              "canCopy": false,
+              "color": "preserve",
+              "durationMs": 10000,
+              "estimatedSizeBytes": 52041237.11340206,
+              "fps": 24,
+              "height": 2160,
+              "mime": "video/avc",
+              "timing": "constant",
+              "width": 3840
+            }
+          }
+        ],
+        "processPeakResidentBytes": 6389760
+      },
+      {
+        "measurements": [
+          {
+            "checksum": 42869870030.228004,
+            "elapsedMs": 65.407,
+            "iterations": 500000,
+            "name": "preserve-4k",
+            "nsPerOperation": 130.814,
+            "output": {
+              "audio": "preserve",
+              "audioBitrateKbps": 384,
+              "bitrateKbps": 69603,
+              "canCopy": true,
+              "color": "preserve",
+              "durationMs": 10000,
+              "estimatedSizeBytes": 90189892.58164516,
+              "fps": 59.94005994005994,
+              "height": 2160,
+              "mime": "video/avc",
+              "timing": "preserve",
+              "width": 3840
+            }
+          },
+          {
+            "checksum": 9178200000,
+            "elapsedMs": 64.474416,
+            "iterations": 500000,
+            "name": "balanced-4k",
+            "nsPerOperation": 128.948832,
+            "output": {
+              "audio": "preserve",
+              "audioBitrateKbps": 384,
+              "bitrateKbps": 5288,
+              "canCopy": false,
+              "color": "preserve",
+              "durationMs": 10000,
+              "estimatedSizeBytes": 7308865.979381444,
+              "fps": 30,
+              "height": 1080,
+              "mime": "video/avc",
+              "timing": "cap",
+              "width": 1920
+            }
+          },
+          {
+            "checksum": 6743800000,
+            "elapsedMs": 64.522292,
+            "iterations": 500000,
+            "name": "small-4k",
+            "nsPerOperation": 129.044584,
+            "output": {
+              "audio": "preserve",
+              "audioBitrateKbps": 384,
+              "bitrateKbps": 1438,
+              "canCopy": false,
+              "color": "preserve",
+              "durationMs": 10000,
+              "estimatedSizeBytes": 2347546.3917525774,
+              "fps": 24,
+              "height": 720,
+              "mime": "video/avc",
+              "timing": "cap",
+              "width": 1280
+            }
+          },
+          {
+            "checksum": 9256370029.915058,
+            "elapsedMs": 65.636125,
+            "iterations": 500000,
+            "name": "target-size-trim",
+            "nsPerOperation": 131.27225,
+            "output": {
+              "audio": "preserve",
+              "audioBitrateKbps": 384,
+              "bitrateKbps": 7376,
+              "canCopy": false,
+              "color": "preserve",
+              "durationMs": 5000,
+              "estimatedSizeBytes": 5000000,
+              "fps": 59.94005994005994,
+              "height": 2160,
+              "mime": "video/avc",
+              "timing": "preserve",
+              "width": 3840
+            }
+          },
+          {
+            "checksum": 42869870030.228004,
+            "elapsedMs": 156.001709,
+            "iterations": 500000,
+            "name": "watermark-4k",
+            "nsPerOperation": 312.003418,
+            "output": {
+              "audio": "preserve",
+              "audioBitrateKbps": 384,
+              "bitrateKbps": 69603,
+              "canCopy": false,
+              "color": "preserve",
+              "durationMs": 10000,
+              "estimatedSizeBytes": 90189892.58164516,
+              "fps": 59.94005994005994,
+              "height": 2160,
+              "mime": "video/avc",
+              "timing": "preserve",
+              "width": 3840
+            }
+          },
+          {
+            "checksum": 30689370029.856236,
+            "elapsedMs": 60.746,
+            "iterations": 500000,
+            "name": "hdr-preserve-4k",
+            "nsPerOperation": 121.492,
+            "output": {
+              "audio": "preserve",
+              "audioBitrateKbps": 384,
+              "bitrateKbps": 45242,
+              "canCopy": true,
+              "color": "preserve",
+              "durationMs": 10000,
+              "estimatedSizeBytes": 58796626.05435803,
+              "fps": 59.94005994005994,
+              "height": 2160,
+              "mime": "video/hevc",
+              "timing": "preserve",
+              "width": 3840
+            }
+          },
+          {
+            "checksum": 28050400000,
+            "elapsedMs": 66.95975,
+            "iterations": 500000,
+            "name": "constant-24fps",
+            "nsPerOperation": 133.9195,
+            "output": {
+              "audio": "preserve",
+              "audioBitrateKbps": 384,
+              "bitrateKbps": 40000,
+              "canCopy": false,
+              "color": "preserve",
+              "durationMs": 10000,
+              "estimatedSizeBytes": 52041237.11340206,
+              "fps": 24,
+              "height": 2160,
+              "mime": "video/avc",
+              "timing": "constant",
+              "width": 3840
+            }
+          }
+        ],
+        "processPeakResidentBytes": 6389760
+      },
+      {
+        "measurements": [
+          {
+            "checksum": 42869870030.228004,
+            "elapsedMs": 65.425833,
+            "iterations": 500000,
+            "name": "preserve-4k",
+            "nsPerOperation": 130.851666,
+            "output": {
+              "audio": "preserve",
+              "audioBitrateKbps": 384,
+              "bitrateKbps": 69603,
+              "canCopy": true,
+              "color": "preserve",
+              "durationMs": 10000,
+              "estimatedSizeBytes": 90189892.58164516,
+              "fps": 59.94005994005994,
+              "height": 2160,
+              "mime": "video/avc",
+              "timing": "preserve",
+              "width": 3840
+            }
+          },
+          {
+            "checksum": 9178200000,
+            "elapsedMs": 64.370209,
+            "iterations": 500000,
+            "name": "balanced-4k",
+            "nsPerOperation": 128.740418,
+            "output": {
+              "audio": "preserve",
+              "audioBitrateKbps": 384,
+              "bitrateKbps": 5288,
+              "canCopy": false,
+              "color": "preserve",
+              "durationMs": 10000,
+              "estimatedSizeBytes": 7308865.979381444,
+              "fps": 30,
+              "height": 1080,
+              "mime": "video/avc",
+              "timing": "cap",
+              "width": 1920
+            }
+          },
+          {
+            "checksum": 6743800000,
+            "elapsedMs": 64.449125,
+            "iterations": 500000,
+            "name": "small-4k",
+            "nsPerOperation": 128.89825,
+            "output": {
+              "audio": "preserve",
+              "audioBitrateKbps": 384,
+              "bitrateKbps": 1438,
+              "canCopy": false,
+              "color": "preserve",
+              "durationMs": 10000,
+              "estimatedSizeBytes": 2347546.3917525774,
+              "fps": 24,
+              "height": 720,
+              "mime": "video/avc",
+              "timing": "cap",
+              "width": 1280
+            }
+          },
+          {
+            "checksum": 9256370029.915058,
+            "elapsedMs": 65.752958,
+            "iterations": 500000,
+            "name": "target-size-trim",
+            "nsPerOperation": 131.505916,
+            "output": {
+              "audio": "preserve",
+              "audioBitrateKbps": 384,
+              "bitrateKbps": 7376,
+              "canCopy": false,
+              "color": "preserve",
+              "durationMs": 5000,
+              "estimatedSizeBytes": 5000000,
+              "fps": 59.94005994005994,
+              "height": 2160,
+              "mime": "video/avc",
+              "timing": "preserve",
+              "width": 3840
+            }
+          },
+          {
+            "checksum": 42869870030.228004,
+            "elapsedMs": 153.7995,
+            "iterations": 500000,
+            "name": "watermark-4k",
+            "nsPerOperation": 307.599,
+            "output": {
+              "audio": "preserve",
+              "audioBitrateKbps": 384,
+              "bitrateKbps": 69603,
+              "canCopy": false,
+              "color": "preserve",
+              "durationMs": 10000,
+              "estimatedSizeBytes": 90189892.58164516,
+              "fps": 59.94005994005994,
+              "height": 2160,
+              "mime": "video/avc",
+              "timing": "preserve",
+              "width": 3840
+            }
+          },
+          {
+            "checksum": 30689370029.856236,
+            "elapsedMs": 60.870167,
+            "iterations": 500000,
+            "name": "hdr-preserve-4k",
+            "nsPerOperation": 121.740334,
+            "output": {
+              "audio": "preserve",
+              "audioBitrateKbps": 384,
+              "bitrateKbps": 45242,
+              "canCopy": true,
+              "color": "preserve",
+              "durationMs": 10000,
+              "estimatedSizeBytes": 58796626.05435803,
+              "fps": 59.94005994005994,
+              "height": 2160,
+              "mime": "video/hevc",
+              "timing": "preserve",
+              "width": 3840
+            }
+          },
+          {
+            "checksum": 28050400000,
+            "elapsedMs": 66.908208,
+            "iterations": 500000,
+            "name": "constant-24fps",
+            "nsPerOperation": 133.816416,
+            "output": {
+              "audio": "preserve",
+              "audioBitrateKbps": 384,
+              "bitrateKbps": 40000,
+              "canCopy": false,
+              "color": "preserve",
+              "durationMs": 10000,
+              "estimatedSizeBytes": 52041237.11340206,
+              "fps": 24,
+              "height": 2160,
+              "mime": "video/avc",
+              "timing": "constant",
+              "width": 3840
+            }
+          }
+        ],
+        "processPeakResidentBytes": 6389760
+      },
+      {
+        "measurements": [
+          {
+            "checksum": 42869870030.228004,
+            "elapsedMs": 65.328208,
+            "iterations": 500000,
+            "name": "preserve-4k",
+            "nsPerOperation": 130.656416,
+            "output": {
+              "audio": "preserve",
+              "audioBitrateKbps": 384,
+              "bitrateKbps": 69603,
+              "canCopy": true,
+              "color": "preserve",
+              "durationMs": 10000,
+              "estimatedSizeBytes": 90189892.58164516,
+              "fps": 59.94005994005994,
+              "height": 2160,
+              "mime": "video/avc",
+              "timing": "preserve",
+              "width": 3840
+            }
+          },
+          {
+            "checksum": 9178200000,
+            "elapsedMs": 64.43625,
+            "iterations": 500000,
+            "name": "balanced-4k",
+            "nsPerOperation": 128.8725,
+            "output": {
+              "audio": "preserve",
+              "audioBitrateKbps": 384,
+              "bitrateKbps": 5288,
+              "canCopy": false,
+              "color": "preserve",
+              "durationMs": 10000,
+              "estimatedSizeBytes": 7308865.979381444,
+              "fps": 30,
+              "height": 1080,
+              "mime": "video/avc",
+              "timing": "cap",
+              "width": 1920
+            }
+          },
+          {
+            "checksum": 6743800000,
+            "elapsedMs": 64.4425,
+            "iterations": 500000,
+            "name": "small-4k",
+            "nsPerOperation": 128.885,
+            "output": {
+              "audio": "preserve",
+              "audioBitrateKbps": 384,
+              "bitrateKbps": 1438,
+              "canCopy": false,
+              "color": "preserve",
+              "durationMs": 10000,
+              "estimatedSizeBytes": 2347546.3917525774,
+              "fps": 24,
+              "height": 720,
+              "mime": "video/avc",
+              "timing": "cap",
+              "width": 1280
+            }
+          },
+          {
+            "checksum": 9256370029.915058,
+            "elapsedMs": 65.802917,
+            "iterations": 500000,
+            "name": "target-size-trim",
+            "nsPerOperation": 131.605834,
+            "output": {
+              "audio": "preserve",
+              "audioBitrateKbps": 384,
+              "bitrateKbps": 7376,
+              "canCopy": false,
+              "color": "preserve",
+              "durationMs": 5000,
+              "estimatedSizeBytes": 5000000,
+              "fps": 59.94005994005994,
+              "height": 2160,
+              "mime": "video/avc",
+              "timing": "preserve",
+              "width": 3840
+            }
+          },
+          {
+            "checksum": 42869870030.228004,
+            "elapsedMs": 156.100167,
+            "iterations": 500000,
+            "name": "watermark-4k",
+            "nsPerOperation": 312.200334,
+            "output": {
+              "audio": "preserve",
+              "audioBitrateKbps": 384,
+              "bitrateKbps": 69603,
+              "canCopy": false,
+              "color": "preserve",
+              "durationMs": 10000,
+              "estimatedSizeBytes": 90189892.58164516,
+              "fps": 59.94005994005994,
+              "height": 2160,
+              "mime": "video/avc",
+              "timing": "preserve",
+              "width": 3840
+            }
+          },
+          {
+            "checksum": 30689370029.856236,
+            "elapsedMs": 61.004667,
+            "iterations": 500000,
+            "name": "hdr-preserve-4k",
+            "nsPerOperation": 122.009334,
+            "output": {
+              "audio": "preserve",
+              "audioBitrateKbps": 384,
+              "bitrateKbps": 45242,
+              "canCopy": true,
+              "color": "preserve",
+              "durationMs": 10000,
+              "estimatedSizeBytes": 58796626.05435803,
+              "fps": 59.94005994005994,
+              "height": 2160,
+              "mime": "video/hevc",
+              "timing": "preserve",
+              "width": 3840
+            }
+          },
+          {
+            "checksum": 28050400000,
+            "elapsedMs": 67.050959,
+            "iterations": 500000,
+            "name": "constant-24fps",
+            "nsPerOperation": 134.101918,
+            "output": {
+              "audio": "preserve",
+              "audioBitrateKbps": 384,
+              "bitrateKbps": 40000,
+              "canCopy": false,
+              "color": "preserve",
+              "durationMs": 10000,
+              "estimatedSizeBytes": 52041237.11340206,
+              "fps": 24,
+              "height": 2160,
+              "mime": "video/avc",
+              "timing": "constant",
+              "width": 3840
+            }
+          }
+        ],
+        "processPeakResidentBytes": 6389760
+      },
+      {
+        "measurements": [
+          {
+            "checksum": 42869870030.228004,
+            "elapsedMs": 65.487209,
+            "iterations": 500000,
+            "name": "preserve-4k",
+            "nsPerOperation": 130.974418,
+            "output": {
+              "audio": "preserve",
+              "audioBitrateKbps": 384,
+              "bitrateKbps": 69603,
+              "canCopy": true,
+              "color": "preserve",
+              "durationMs": 10000,
+              "estimatedSizeBytes": 90189892.58164516,
+              "fps": 59.94005994005994,
+              "height": 2160,
+              "mime": "video/avc",
+              "timing": "preserve",
+              "width": 3840
+            }
+          },
+          {
+            "checksum": 9178200000,
+            "elapsedMs": 64.605042,
+            "iterations": 500000,
+            "name": "balanced-4k",
+            "nsPerOperation": 129.210084,
+            "output": {
+              "audio": "preserve",
+              "audioBitrateKbps": 384,
+              "bitrateKbps": 5288,
+              "canCopy": false,
+              "color": "preserve",
+              "durationMs": 10000,
+              "estimatedSizeBytes": 7308865.979381444,
+              "fps": 30,
+              "height": 1080,
+              "mime": "video/avc",
+              "timing": "cap",
+              "width": 1920
+            }
+          },
+          {
+            "checksum": 6743800000,
+            "elapsedMs": 64.446792,
+            "iterations": 500000,
+            "name": "small-4k",
+            "nsPerOperation": 128.893584,
+            "output": {
+              "audio": "preserve",
+              "audioBitrateKbps": 384,
+              "bitrateKbps": 1438,
+              "canCopy": false,
+              "color": "preserve",
+              "durationMs": 10000,
+              "estimatedSizeBytes": 2347546.3917525774,
+              "fps": 24,
+              "height": 720,
+              "mime": "video/avc",
+              "timing": "cap",
+              "width": 1280
+            }
+          },
+          {
+            "checksum": 9256370029.915058,
+            "elapsedMs": 65.86025,
+            "iterations": 500000,
+            "name": "target-size-trim",
+            "nsPerOperation": 131.7205,
+            "output": {
+              "audio": "preserve",
+              "audioBitrateKbps": 384,
+              "bitrateKbps": 7376,
+              "canCopy": false,
+              "color": "preserve",
+              "durationMs": 5000,
+              "estimatedSizeBytes": 5000000,
+              "fps": 59.94005994005994,
+              "height": 2160,
+              "mime": "video/avc",
+              "timing": "preserve",
+              "width": 3840
+            }
+          },
+          {
+            "checksum": 42869870030.228004,
+            "elapsedMs": 161.526208,
+            "iterations": 500000,
+            "name": "watermark-4k",
+            "nsPerOperation": 323.052416,
+            "output": {
+              "audio": "preserve",
+              "audioBitrateKbps": 384,
+              "bitrateKbps": 69603,
+              "canCopy": false,
+              "color": "preserve",
+              "durationMs": 10000,
+              "estimatedSizeBytes": 90189892.58164516,
+              "fps": 59.94005994005994,
+              "height": 2160,
+              "mime": "video/avc",
+              "timing": "preserve",
+              "width": 3840
+            }
+          },
+          {
+            "checksum": 30689370029.856236,
+            "elapsedMs": 60.910375,
+            "iterations": 500000,
+            "name": "hdr-preserve-4k",
+            "nsPerOperation": 121.82075,
+            "output": {
+              "audio": "preserve",
+              "audioBitrateKbps": 384,
+              "bitrateKbps": 45242,
+              "canCopy": true,
+              "color": "preserve",
+              "durationMs": 10000,
+              "estimatedSizeBytes": 58796626.05435803,
+              "fps": 59.94005994005994,
+              "height": 2160,
+              "mime": "video/hevc",
+              "timing": "preserve",
+              "width": 3840
+            }
+          },
+          {
+            "checksum": 28050400000,
+            "elapsedMs": 66.909333,
+            "iterations": 500000,
+            "name": "constant-24fps",
+            "nsPerOperation": 133.818666,
+            "output": {
+              "audio": "preserve",
+              "audioBitrateKbps": 384,
+              "bitrateKbps": 40000,
+              "canCopy": false,
+              "color": "preserve",
+              "durationMs": 10000,
+              "estimatedSizeBytes": 52041237.11340206,
+              "fps": 24,
+              "height": 2160,
+              "mime": "video/avc",
+              "timing": "constant",
+              "width": 3840
+            }
+          }
+        ],
+        "processPeakResidentBytes": 6389760
+      }
+    ]
+  },
+  "plannerComparison": [
+    {
+      "name": "preserve-4k",
+      "beforeNs": {
+        "median": 39.296707999999995,
+        "min": 39.185666,
+        "max": 39.4595
+      },
+      "afterNs": {
+        "median": 130.882875,
+        "min": 130.656416,
+        "max": 131.12025
+      },
+      "medianDeltaPercent": 233.0632046837105,
+      "medianDeltaNs": 91.58616700000002,
+      "pairedBootstrapRatio95": [
+        3.324326727077605,
+        3.3369562431435713
+      ],
+      "identicalOutput": true
+    },
+    {
+      "name": "balanced-4k",
+      "beforeNs": {
+        "median": 38.064125000000004,
+        "min": 37.78325,
+        "max": 38.58175
+      },
+      "afterNs": {
+        "median": 128.823709,
+        "min": 128.37525,
+        "max": 129.210084
+      },
+      "medianDeltaPercent": 238.43864531235118,
+      "medianDeltaNs": 90.759584,
+      "pairedBootstrapRatio95": [
+        3.371962695007097,
+        3.392912264426228
+      ],
+      "identicalOutput": true
+    },
+    {
+      "name": "small-4k",
+      "beforeNs": {
+        "median": 38.39275,
+        "min": 38.272918,
+        "max": 38.801416
+      },
+      "afterNs": {
+        "median": 128.889292,
+        "min": 128.479,
+        "max": 135.552
+      },
+      "medianDeltaPercent": 235.7125811513893,
+      "medianDeltaNs": 90.496542,
+      "pairedBootstrapRatio95": [
+        3.3437352807647907,
+        3.3608869785036575
+      ],
+      "identicalOutput": true
+    },
+    {
+      "name": "target-size-trim",
+      "beforeNs": {
+        "median": 41.855334,
+        "min": 41.77575,
+        "max": 42.18
+      },
+      "afterNs": {
+        "median": 131.96499999999997,
+        "min": 131.27225,
+        "max": 138.030666
+      },
+      "medianDeltaPercent": 215.28836921955988,
+      "medianDeltaNs": 90.10966599999998,
+      "pairedBootstrapRatio95": [
+        3.1391603747111754,
+        3.264518023488869
+      ],
+      "identicalOutput": true
+    },
+    {
+      "name": "watermark-4k",
+      "beforeNs": {
+        "median": 37.866665999999995,
+        "min": 37.239416,
+        "max": 38.012166
+      },
+      "afterNs": {
+        "median": 311.767876,
+        "min": 307.599,
+        "max": 323.052416
+      },
+      "medianDeltaPercent": 723.3306729459625,
+      "medianDeltaNs": 273.90121,
+      "pairedBootstrapRatio95": [
+        8.219153987860603,
+        8.299719579522549
+      ],
+      "identicalOutput": true
+    },
+    {
+      "name": "hdr-preserve-4k",
+      "beforeNs": {
+        "median": 35.457792,
+        "min": 35.403584,
+        "max": 35.582832
+      },
+      "afterNs": {
+        "median": 121.859875,
+        "min": 121.492,
+        "max": 122.273584
+      },
+      "medianDeltaPercent": 243.67586960857577,
+      "medianDeltaNs": 86.402083,
+      "pairedBootstrapRatio95": [
+        3.43055340183668,
+        3.441315736756718
+      ],
+      "identicalOutput": true
+    },
+    {
+      "name": "constant-24fps",
+      "beforeNs": {
+        "median": 40.84775,
+        "min": 40.705918,
+        "max": 40.962168
+      },
+      "afterNs": {
+        "median": 133.869083,
+        "min": 133.076666,
+        "max": 140.397666
+      },
+      "medianDeltaPercent": 227.72694456855027,
+      "medianDeltaNs": 93.021333,
+      "pairedBootstrapRatio95": [
+        3.2721200343549133,
+        3.342878855870835
+      ],
+      "identicalOutput": true
+    }
+  ],
+  "plannerProcessPeakResidentBytes": {
+    "before": {
+      "median": 6324224.0,
+      "min": 6324224,
+      "max": 6324224
+    },
+    "after": {
+      "median": 6389760.0,
+      "min": 6389760,
+      "max": 6389760
+    }
+  },
+  "loudnessAfterOnly": [
+    {
+      "name": "48000hz-1ch-60s",
+      "baseline": "feature absent in 0.5.0",
+      "elapsedMs": {
+        "median": 255.667,
+        "min": 254.396625,
+        "max": 256.926167
+      },
+      "realtimeMultiple": {
+        "median": 234.68026769195868,
+        "min": 233.53012540758448,
+        "max": 235.85218553901805
+      },
+      "processPeakResidentBytes": {
+        "median": 6586368,
+        "min": 6586368,
+        "max": 6586368
+      },
+      "runs": [
+        {
+          "measurements": {
+            "channels": 1,
+            "durationMs": 60000,
+            "elapsedMs": 255.113167,
+            "lufs": -23.003596045251406,
+            "name": "48000hz-1ch-60s",
+            "realtimeMultiple": 235.18974228405858,
+            "samplePeakDb": -19.99999987057016,
+            "sampleRate": 48000,
+            "truePeakDb": -19.99999987057016
+          },
+          "processPeakResidentBytes": 6586368
+        },
+        {
+          "measurements": {
+            "channels": 1,
+            "durationMs": 60000,
+            "elapsedMs": 256.926167,
+            "lufs": -23.003596045251406,
+            "name": "48000hz-1ch-60s",
+            "realtimeMultiple": 233.53012540758448,
+            "samplePeakDb": -19.99999987057016,
+            "sampleRate": 48000,
+            "truePeakDb": -19.99999987057016
+          },
+          "processPeakResidentBytes": 6586368
+        },
+        {
+          "measurements": {
+            "channels": 1,
+            "durationMs": 60000,
+            "elapsedMs": 255.667,
+            "lufs": -23.003596045251406,
+            "name": "48000hz-1ch-60s",
+            "realtimeMultiple": 234.68026769195868,
+            "samplePeakDb": -19.99999987057016,
+            "sampleRate": 48000,
+            "truePeakDb": -19.99999987057016
+          },
+          "processPeakResidentBytes": 6586368
+        },
+        {
+          "measurements": {
+            "channels": 1,
+            "durationMs": 60000,
+            "elapsedMs": 256.881834,
+            "lufs": -23.003596045251406,
+            "name": "48000hz-1ch-60s",
+            "realtimeMultiple": 233.57042833943638,
+            "samplePeakDb": -19.99999987057016,
+            "sampleRate": 48000,
+            "truePeakDb": -19.99999987057016
+          },
+          "processPeakResidentBytes": 6586368
+        },
+        {
+          "measurements": {
+            "channels": 1,
+            "durationMs": 60000,
+            "elapsedMs": 254.396625,
+            "lufs": -23.003596045251406,
+            "name": "48000hz-1ch-60s",
+            "realtimeMultiple": 235.85218553901805,
+            "samplePeakDb": -19.99999987057016,
+            "sampleRate": 48000,
+            "truePeakDb": -19.99999987057016
+          },
+          "processPeakResidentBytes": 6586368
+        }
+      ]
+    },
+    {
+      "name": "48000hz-2ch-60s",
+      "baseline": "feature absent in 0.5.0",
+      "elapsedMs": {
+        "median": 471.827458,
+        "min": 471.014291,
+        "max": 476.191542
+      },
+      "realtimeMultiple": {
+        "median": 127.16512992764402,
+        "min": 125.9997179874312,
+        "max": 127.38466994836892
+      },
+      "processPeakResidentBytes": {
+        "median": 6553600,
+        "min": 6553600,
+        "max": 6553600
+      },
+      "runs": [
+        {
+          "measurements": {
+            "channels": 2,
+            "durationMs": 60000,
+            "elapsedMs": 471.461458,
+            "lufs": -19.99329608861159,
+            "name": "48000hz-2ch-60s",
+            "realtimeMultiple": 127.26384942372108,
+            "samplePeakDb": -19.99999987057016,
+            "sampleRate": 48000,
+            "truePeakDb": -19.99999987057016
+          },
+          "processPeakResidentBytes": 6553600
+        },
+        {
+          "measurements": {
+            "channels": 2,
+            "durationMs": 60000,
+            "elapsedMs": 471.014291,
+            "lufs": -19.99329608861159,
+            "name": "48000hz-2ch-60s",
+            "realtimeMultiple": 127.38466994836892,
+            "samplePeakDb": -19.99999987057016,
+            "sampleRate": 48000,
+            "truePeakDb": -19.99999987057016
+          },
+          "processPeakResidentBytes": 6553600
+        },
+        {
+          "measurements": {
+            "channels": 2,
+            "durationMs": 60000,
+            "elapsedMs": 476.191542,
+            "lufs": -19.99329608861159,
+            "name": "48000hz-2ch-60s",
+            "realtimeMultiple": 125.9997179874312,
+            "samplePeakDb": -19.99999987057016,
+            "sampleRate": 48000,
+            "truePeakDb": -19.99999987057016
+          },
+          "processPeakResidentBytes": 6553600
+        },
+        {
+          "measurements": {
+            "channels": 2,
+            "durationMs": 60000,
+            "elapsedMs": 471.827458,
+            "lufs": -19.99329608861159,
+            "name": "48000hz-2ch-60s",
+            "realtimeMultiple": 127.16512992764402,
+            "samplePeakDb": -19.99999987057016,
+            "sampleRate": 48000,
+            "truePeakDb": -19.99999987057016
+          },
+          "processPeakResidentBytes": 6553600
+        },
+        {
+          "measurements": {
+            "channels": 2,
+            "durationMs": 60000,
+            "elapsedMs": 472.552333,
+            "lufs": -19.99329608861159,
+            "name": "48000hz-2ch-60s",
+            "realtimeMultiple": 126.97006407542167,
+            "samplePeakDb": -19.99999987057016,
+            "sampleRate": 48000,
+            "truePeakDb": -19.99999987057016
+          },
+          "processPeakResidentBytes": 6553600
+        }
+      ]
+    },
+    {
+      "name": "192000hz-2ch-10s",
+      "baseline": "feature absent in 0.5.0",
+      "elapsedMs": {
+        "median": 318.528709,
+        "min": 316.437625,
+        "max": 319.259083
+      },
+      "realtimeMultiple": {
+        "median": 31.394344426266457,
+        "min": 31.3225230932584,
+        "max": 31.60180462105288
+      },
+      "processPeakResidentBytes": {
+        "median": 7077888,
+        "min": 7077888,
+        "max": 7077888
+      },
+      "runs": [
+        {
+          "measurements": {
+            "channels": 2,
+            "durationMs": 10000,
+            "elapsedMs": 318.307875,
+            "lufs": -20.020344293076484,
+            "name": "192000hz-2ch-10s",
+            "realtimeMultiple": 31.416125033036018,
+            "samplePeakDb": -19.99999987057016,
+            "sampleRate": 192000,
+            "truePeakDb": -19.99447808079975
+          },
+          "processPeakResidentBytes": 7077888
+        },
+        {
+          "measurements": {
+            "channels": 2,
+            "durationMs": 10000,
+            "elapsedMs": 319.259083,
+            "lufs": -20.020344293076484,
+            "name": "192000hz-2ch-10s",
+            "realtimeMultiple": 31.3225230932584,
+            "samplePeakDb": -19.99999987057016,
+            "sampleRate": 192000,
+            "truePeakDb": -19.99447808079975
+          },
+          "processPeakResidentBytes": 7077888
+        },
+        {
+          "measurements": {
+            "channels": 2,
+            "durationMs": 10000,
+            "elapsedMs": 316.437625,
+            "lufs": -20.020344293076484,
+            "name": "192000hz-2ch-10s",
+            "realtimeMultiple": 31.60180462105288,
+            "samplePeakDb": -19.99999987057016,
+            "sampleRate": 192000,
+            "truePeakDb": -19.99447808079975
+          },
+          "processPeakResidentBytes": 7077888
+        },
+        {
+          "measurements": {
+            "channels": 2,
+            "durationMs": 10000,
+            "elapsedMs": 318.528709,
+            "lufs": -20.020344293076484,
+            "name": "192000hz-2ch-10s",
+            "realtimeMultiple": 31.394344426266457,
+            "samplePeakDb": -19.99999987057016,
+            "sampleRate": 192000,
+            "truePeakDb": -19.99447808079975
+          },
+          "processPeakResidentBytes": 7077888
+        },
+        {
+          "measurements": {
+            "channels": 2,
+            "durationMs": 10000,
+            "elapsedMs": 318.658583,
+            "lufs": -20.020344293076484,
+            "name": "192000hz-2ch-10s",
+            "realtimeMultiple": 31.381549198692067,
+            "samplePeakDb": -19.99999987057016,
+            "sampleRate": 192000,
+            "truePeakDb": -19.99447808079975
+          },
+          "processPeakResidentBytes": 7077888
+        }
+      ]
+    }
+  ],
+  "loudnessReference": {
+    "fixture": "3s 1kHz, 48kHz stereo, -20dBFS sine",
+    "swift": {
+      "channels": 2,
+      "durationMs": 3000,
+      "elapsedMs": 24.026583,
+      "lufs": -19.99330668662371,
+      "name": "48000hz-2ch-3s",
+      "realtimeMultiple": 124.86170005947163,
+      "samplePeakDb": -19.99999987057016,
+      "sampleRate": 48000,
+      "truePeakDb": -19.99999987057016
+    },
+    "ffmpegVersion": "ffmpeg version 9.0.2 Copyright (c) 2000-2026 the FFmpeg developers",
+    "ffmpegSummary": "Summary:\n\n  Integrated loudness:\n    I:         -20.0 LUFS\n    Threshold: -30.0 LUFS\n\n  Loudness range:\n    LRA:        20.0 LU\n    Threshold: -40.0 LUFS\n    LRA low:   -40.0 LUFS\n    LRA high:  -20.0 LUFS\n\n  True peak:\n    Peak:      -20.0 dBFS\n[out#0/null @ 0x8df018240] video:0KiB audio:562KiB subtitle:0KiB other streams:0KiB global headers:0KiB muxing overhead: unknown\nsize=N/A time=00:00:03.00 bitrate=N/A speed= 112x elapsed=0:00:00.02    \n"
+  }
+}

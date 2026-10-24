@@ -1,0 +1,17 @@
+node_modules/
+example/node_modules/
+.yarn/
+nitrogen/
+lib/
+**/build/
+**/generated/
+**/.cxx/
+**/.gradle/
+**/.kotlin/
+example/ios/Pods/
+example/vendor/
+test-fixtures/
+benchmarks/results/
+yarn.lock
+**/Podfile.lock
+**/Gemfile.lock

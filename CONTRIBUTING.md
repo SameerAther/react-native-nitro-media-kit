@@ -96,6 +96,31 @@ Remember to add tests for your change if possible. Run the unit tests by:
 yarn test
 ```
 
+### Formatting
+
+Use the checked-in formatter settings. JavaScript, TypeScript, JSON, YAML, and Markdown use the project’s pinned Prettier dependency:
+
+```sh
+yarn format
+yarn format:check
+```
+
+Native and Python source use Swift Format from the Swift 6.2 toolchain, ktlint 1.6.0, Clang Format from Xcode, and Black 25.1.0. Install those tools separately; Black reads its configuration from `pyproject.toml`. Format only authored source, not dependencies or generated bindings:
+
+```sh
+swift-format format --in-place --configuration .swift-format --recursive \
+  ios tests/host benchmarks/host \
+  example/ios/NitroMediaKitExample example/ios/NitroMediaKitTests
+ktlint -F 'android/src/**/*.kt' 'example/android/app/src/**/*.kt'
+clang-format -i android/src/main/cpp/cpp-adapter.cpp
+python3 -m black scripts
+```
+
+The `.prettierignore` file excludes dependency, build, generated, lock, fixture, and recorded benchmark files. Keep the original measured benchmark records unchanged when formatting source.
+
+### Nitro code generation
+
+Keep Nitro runtime and Nitrogen aligned at 0.37.1. This source tree includes a pinned Yarn patch that generates indexed Swift vector conversions, avoiding Swift 6.2 C++ interop failures for vectors of custom structs. Use `yarn nitrogen` or `yarn prepare` to regenerate bindings; do not edit generated files. Recheck the patch when upgrading Nitrogen.
 
 ### Commit message convention
 
@@ -110,7 +135,6 @@ We follow the [conventional commits specification](https://www.conventionalcommi
 
 Our pre-commit hooks verify that your commit message matches this format when committing.
 
-
 ### Publishing to npm
 
 We use [release-it](https://github.com/release-it/release-it) to make it easier to publish new versions. It handles common tasks like bumping version based on semver, creating tags and releases etc.
@@ -120,7 +144,6 @@ To publish new versions, run the following:
 ```sh
 yarn release
 ```
-
 
 ### Scripts
 

@@ -1,0 +1,63 @@
+{
+  "before": {
+    "commit": "7047c095231e79994b9a2326c9e999432168f8d5",
+    "workingTreeChanges": false,
+    "javascript": {
+      "numTotalTests": 6,
+      "numPassedTests": 6,
+      "numFailedTests": 0,
+      "numTotalTestSuites": 2
+    },
+    "androidJvm": {
+      "tests": 18,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    "swiftHost": [
+      "Swift export planning: dimensions, fractional timing, target size, audio and color policies passed",
+      "Swift file ownership: staging, atomic commit, leases, idempotent deletion and byte budgets passed",
+      "Swift job controls: cancellation, sealing, deadline, validation and permit recovery passed"
+    ],
+    "validator": ".....\n----------------------------------------------------------------------\nRan 5 tests in 2.671s\n\nOK",
+    "typecheck": "passed; no diagnostics",
+    "eslint": "passed; stale Browserslist data warning",
+    "androidCompile": "passed; Kotlin and arm64 C++"
+  },
+  "after": {
+    "commit": "7047c095231e79994b9a2326c9e999432168f8d5",
+    "workingTreeChanges": true,
+    "javascript": {
+      "numTotalTests": 6,
+      "numPassedTests": 6,
+      "numFailedTests": 0,
+      "numTotalTestSuites": 2
+    },
+    "androidJvm": {
+      "tests": 33,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    "swiftHost": [
+      "Swift loudness: K-weighting, gated 1kHz reference level, sample peak and silence passed",
+      "Swift editing: oriented crops, canvas validation, speed, copy policy and subtitle timing passed",
+      "Swift export planning: dimensions, fractional timing, target size, audio and color policies passed",
+      "Swift native asset lifetime: deferred disposal, multiple borrowers and source mutation passed",
+      "Swift file ownership: staging, atomic commit, leases, idempotent deletion and byte budgets passed",
+      "Swift job controls: cancellation, sealing, deadline, validation and permit recovery passed"
+    ],
+    "validator": ".....\n----------------------------------------------------------------------\nRan 5 tests in 5.150s\n\nOK",
+    "typecheck": "passed; no diagnostics",
+    "eslint": "passed; stale Browserslist data warning",
+    "androidCompile": "passed; Kotlin and arm64 C++",
+    "iosCompile": "passed; arm64 SDK build only; no simulator launched"
+  },
+  "method": {
+    "baseline": "git archive v0.5.0; verified baseline Android autolinking points at isolated baseline sources",
+    "dependencies": "same installed dev dependencies; generated baseline bindings with the installed pinned Nitrogen 0.37.1 tool",
+    "runtimeRestrictions": "no UI, simulator, emulator or physical-device app runs",
+    "testDurations": "not compared as performance: suites differ and caches/warmups were not controlled",
+    "offlineValidation": "tests the checker against synthetic fixtures; does not validate native export output"
+  }
+}

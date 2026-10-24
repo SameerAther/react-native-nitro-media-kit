@@ -18,7 +18,7 @@ find_library(LOG_LIB log)
 
 # Link all libraries together
 target_link_libraries(
-        ${PACKAGE_NAME}
-        ${LOG_LIB}
-        android # <-- Android core
+  ${PACKAGE_NAME}
+  ${LOG_LIB}
+  android # <-- Android core
 )
